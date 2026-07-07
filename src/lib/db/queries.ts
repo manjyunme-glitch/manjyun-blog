@@ -1,0 +1,720 @@
+import { all, get, run } from "@/lib/db/client";
+import { slugify, splitCommaList } from "@/lib/content/slug";
+import type {
+  HomeModule,
+  MediaRecord,
+  NavLink,
+  PostRecord,
+  PostRevision,
+  PostStatus,
+  PostType,
+  PostWithTags,
+  SiteSettings,
+  ThemeInstallRecord,
+  TagRecord
+} from "@/types/blog";
+
+type SettingRow = { key: string; value: string };
+type CountRow = { count: number };
+type IdRow = { id: number };
+
+export type SavePostInput = {
+  id?: number;
+  type: PostType;
+  title: string;
+  slug?: string;
+  markdown: string;
+  excerpt?: string;
+  cover?: string;
+  status: PostStatus;
+  publishedAt?: string | null;
+  seoTitle?: string;
+  seoDescription?: string;
+  tags?: string[];
+};
+
+const settingDefaults: SiteSettings = {
+  siteTitle: "ManJyun",
+  siteDescription: "一个自托管的个人博客与折腾记录。",
+  baseUrl: process.env.SITE_URL ?? "http://localhost:4482",
+  activeTheme: "manjyun-console",
+  heroBio:
+    "折腾爱好者，热衷于 self-hosting 和各种不务正业的技术实验。相信能自建的绝不用别人的，能折腾的绝不躺平。",
+  heroTags: "Homelab,Networking,NAS,Docker,Linux,Proxy,Self-hosted",
+  stackItems:
+    "Debian,Docker,Nginx,Cloudflare,Python,Mihomo,Xray,Hysteria2,WireGuard,ZFS",
+  uptimeStart: "2026-03-20",
+  blogTitle: "All Posts",
+  blogDescription: "按时间倒序浏览博客文章。",
+  projectsTitle: "Projects",
+  projectsDescription: "记录已经完成、正在折腾、或者值得复盘的项目。",
+  aboutTitle: "About",
+  aboutMarkdown:
+    "这里是关于页面。可以在后台设置里写 Markdown，也可以创建 slug 为 `about` 的页面来覆盖它。"
+};
+
+function normalizePost(row: PostRecord): PostRecord {
+  return {
+    ...row,
+    publishedAt: row.publishedAt ?? null,
+    excerpt: row.excerpt ?? null,
+    cover: row.cover ?? null,
+    seoTitle: row.seoTitle ?? null,
+    seoDescription: row.seoDescription ?? null
+  };
+}
+
+function postSelect(prefix = "p") {
+  return `
+    ${prefix}.id,
+    ${prefix}.type,
+    ${prefix}.slug,
+    ${prefix}.title,
+    ${prefix}.markdown,
+    ${prefix}.excerpt,
+    ${prefix}.cover,
+    ${prefix}.status,
+    ${prefix}.published_at AS publishedAt,
+    ${prefix}.seo_title AS seoTitle,
+    ${prefix}.seo_description AS seoDescription,
+    ${prefix}.created_at AS createdAt,
+    ${prefix}.updated_at AS updatedAt
+  `;
+}
+
+function normalizeRevision(row: PostRevision): PostRevision {
+  return {
+    ...row,
+    publishedAt: row.publishedAt ?? null,
+    excerpt: row.excerpt ?? null,
+    cover: row.cover ?? null,
+    seoTitle: row.seoTitle ?? null,
+    seoDescription: row.seoDescription ?? null
+  };
+}
+
+function revisionSelect(prefix = "r") {
+  return `
+    ${prefix}.id,
+    ${prefix}.post_id AS postId,
+    ${prefix}.type,
+    ${prefix}.slug,
+    ${prefix}.title,
+    ${prefix}.markdown,
+    ${prefix}.excerpt,
+    ${prefix}.cover,
+    ${prefix}.status,
+    ${prefix}.published_at AS publishedAt,
+    ${prefix}.seo_title AS seoTitle,
+    ${prefix}.seo_description AS seoDescription,
+    ${prefix}.post_created_at AS postCreatedAt,
+    ${prefix}.post_updated_at AS postUpdatedAt,
+    ${prefix}.reason,
+    ${prefix}.created_at AS createdAt
+  `;
+}
+
+export function getSiteSettings(): SiteSettings {
+  const rows = all<SettingRow>("SELECT key, value FROM settings");
+  const data = { ...settingDefaults };
+  for (const row of rows) {
+    if (row.key in data) {
+      data[row.key as keyof SiteSettings] = row.value;
+    }
+  }
+  return data;
+}
+
+export function updateSiteSettings(input: Partial<SiteSettings>) {
+  for (const [key, value] of Object.entries(input)) {
+    if (!(key in settingDefaults)) continue;
+    run(
+      "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+      [key, String(value ?? "")]
+    );
+  }
+}
+
+export function getHomeModules() {
+  return all<{
+    id: string;
+    enabled: number;
+    sortOrder: number;
+    config: string;
+  }>(
+    "SELECT id, enabled, sort_order AS sortOrder, config FROM home_modules ORDER BY sort_order ASC"
+  ).map<HomeModule>((row) => ({
+    id: row.id,
+    enabled: row.enabled === 1,
+    sortOrder: row.sortOrder,
+    config: JSON.parse(row.config || "{}") as Record<string, unknown>
+  }));
+}
+
+export function updateHomeModules(modules: HomeModule[]) {
+  for (const module of modules) {
+    run(
+      `INSERT INTO home_modules (id, enabled, sort_order, config)
+       VALUES (?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         enabled = excluded.enabled,
+         sort_order = excluded.sort_order,
+         config = excluded.config`,
+      [
+        module.id,
+        module.enabled ? 1 : 0,
+        module.sortOrder,
+        JSON.stringify(module.config ?? {})
+      ]
+    );
+  }
+}
+
+export function updateHomeModuleConfig(id: string, config: Record<string, unknown>) {
+  run(
+    "UPDATE home_modules SET config = ? WHERE id = ?",
+    [JSON.stringify(config), id]
+  );
+}
+
+export function getNavLinks(groupName?: NavLink["groupName"]) {
+  const params: unknown[] = [];
+  let sql =
+    "SELECT id, group_name AS groupName, label, url, icon_url AS iconUrl, sort_order AS sortOrder FROM nav_links";
+  if (groupName) {
+    sql += " WHERE group_name = ?";
+    params.push(groupName);
+  }
+  sql += " ORDER BY group_name ASC, sort_order ASC, id ASC";
+  return all<NavLink>(sql, params);
+}
+
+export function replaceNavLinks(groupName: NavLink["groupName"], links: Omit<NavLink, "id" | "groupName">[]) {
+  run("DELETE FROM nav_links WHERE group_name = ?", [groupName]);
+  for (const link of links) {
+    if (!link.label.trim() || !link.url.trim()) continue;
+    run(
+      "INSERT INTO nav_links (group_name, label, url, icon_url, sort_order) VALUES (?, ?, ?, ?, ?)",
+      [
+        groupName,
+        link.label.trim(),
+        link.url.trim(),
+        link.iconUrl?.trim() || null,
+        link.sortOrder
+      ]
+    );
+  }
+}
+
+export function isSetupComplete() {
+  return (
+    get<CountRow>("SELECT COUNT(*) AS count FROM admin_users")?.count ?? 0
+  ) > 0;
+}
+
+export function createAdminUser(username: string, passwordHash: string) {
+  if (isSetupComplete()) {
+    throw new Error("Setup is already complete.");
+  }
+  run("INSERT INTO admin_users (username, password_hash) VALUES (?, ?)", [
+    username,
+    passwordHash
+  ]);
+}
+
+export function getAdminByUsername(username: string) {
+  return get<{ id: number; username: string; passwordHash: string }>(
+    "SELECT id, username, password_hash AS passwordHash FROM admin_users WHERE username = ?",
+    [username]
+  );
+}
+
+export function getAdminById(id: number) {
+  return get<{ id: number; username: string }>(
+    "SELECT id, username FROM admin_users WHERE id = ?",
+    [id]
+  );
+}
+
+export function makeUniqueSlug(type: PostType, desired: string, excludeId?: number) {
+  const base = slugify(desired, type);
+  let candidate = base;
+  let suffix = 2;
+
+  while (true) {
+    const found = get<IdRow>(
+      `SELECT id FROM posts WHERE type = ? AND slug = ? ${
+        excludeId ? "AND id != ?" : ""
+      }`,
+      excludeId ? [type, candidate, excludeId] : [type, candidate]
+    );
+    if (!found) return candidate;
+    candidate = `${base}-${suffix}`;
+    suffix += 1;
+  }
+}
+
+function createPostRevision(post: PostRecord, reason = "save") {
+  run(
+    `INSERT INTO post_revisions (
+      post_id, type, slug, title, markdown, excerpt, cover, status,
+      published_at, seo_title, seo_description, post_created_at, post_updated_at, reason
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      post.id,
+      post.type,
+      post.slug,
+      post.title,
+      post.markdown,
+      post.excerpt,
+      post.cover,
+      post.status,
+      post.publishedAt,
+      post.seoTitle,
+      post.seoDescription,
+      post.createdAt,
+      post.updatedAt,
+      reason
+    ]
+  );
+}
+
+export function savePost(input: SavePostInput) {
+  const title = input.title.trim() || "Untitled";
+  const now = new Date().toISOString();
+  const existing = input.id ? getPostById(input.id) : null;
+  const slug = makeUniqueSlug(
+    input.type,
+    input.slug?.trim() || title,
+    existing?.id
+  );
+  const publishedAt =
+    existing?.publishedAt ??
+    input.publishedAt ??
+    (input.status === "published" ? now : null);
+
+  let id = input.id;
+  if (id && existing) {
+    const reason =
+      input.status === "published" && existing.status !== "published"
+        ? "publish"
+        : input.status === "draft" && existing.status === "published"
+          ? "unpublish"
+          : "save";
+    createPostRevision(existing, reason);
+    run(
+      `UPDATE posts SET
+        type = ?,
+        slug = ?,
+        title = ?,
+        markdown = ?,
+        excerpt = ?,
+        cover = ?,
+        status = ?,
+        published_at = ?,
+        seo_title = ?,
+        seo_description = ?,
+        updated_at = ?
+      WHERE id = ?`,
+      [
+        input.type,
+        slug,
+        title,
+        input.markdown ?? "",
+        input.excerpt?.trim() || null,
+        input.cover?.trim() || null,
+        input.status,
+        publishedAt,
+        input.seoTitle?.trim() || null,
+        input.seoDescription?.trim() || null,
+        now,
+        id
+      ]
+    );
+  } else {
+    const result = run(
+      `INSERT INTO posts (
+        type, slug, title, markdown, excerpt, cover, status,
+        published_at, seo_title, seo_description, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        input.type,
+        slug,
+        title,
+        input.markdown ?? "",
+        input.excerpt?.trim() || null,
+        input.cover?.trim() || null,
+        input.status,
+        publishedAt,
+        input.seoTitle?.trim() || null,
+        input.seoDescription?.trim() || null,
+        now,
+        now
+      ]
+    );
+    id = Number(result.lastInsertRowid);
+  }
+
+  syncPostTags(id, input.tags ?? []);
+  return getPostById(id)!;
+}
+
+function syncPostTags(postId: number, tagNames: string[]) {
+  run("DELETE FROM post_tags WHERE post_id = ?", [postId]);
+  const names = Array.from(
+    new Set(tagNames.map((tag) => tag.trim()).filter(Boolean))
+  );
+  for (const name of names) {
+    const slug = slugify(name, "tag");
+    run(
+      "INSERT INTO tags (slug, name) VALUES (?, ?) ON CONFLICT(slug) DO UPDATE SET name = excluded.name",
+      [slug, name]
+    );
+    const tag = get<IdRow>("SELECT id FROM tags WHERE slug = ?", [slug]);
+    if (tag) {
+      run("INSERT OR IGNORE INTO post_tags (post_id, tag_id) VALUES (?, ?)", [
+        postId,
+        tag.id
+      ]);
+    }
+  }
+}
+
+export function listPosts(options: {
+  type?: PostType;
+  status?: PostStatus;
+  tagSlug?: string;
+  limit?: number;
+  includePages?: boolean;
+  includeTrashed?: boolean;
+} = {}) {
+  const where: string[] = [];
+  const params: unknown[] = [];
+  let join = "";
+
+  if (options.tagSlug) {
+    join =
+      " INNER JOIN post_tags pt ON pt.post_id = p.id INNER JOIN tags t ON t.id = pt.tag_id";
+    where.push("t.slug = ?");
+    params.push(options.tagSlug);
+  }
+  if (options.type) {
+    where.push("p.type = ?");
+    params.push(options.type);
+  } else if (!options.includePages) {
+    where.push("p.type != 'page'");
+  }
+  if (options.status) {
+    where.push("p.status = ?");
+    params.push(options.status);
+  } else if (!options.includeTrashed) {
+    where.push("p.status != 'trashed'");
+  }
+
+  let sql = `SELECT ${postSelect("p")} FROM posts p${join}`;
+  if (where.length) {
+    sql += ` WHERE ${where.join(" AND ")}`;
+  }
+  sql += " ORDER BY COALESCE(p.published_at, p.created_at) DESC, p.id DESC";
+  if (options.limit) {
+    sql += " LIMIT ?";
+    params.push(options.limit);
+  }
+  return all<PostRecord>(sql, params).map(normalizePost);
+}
+
+export function getPostById(id: number) {
+  const post = get<PostRecord>(`SELECT ${postSelect("p")} FROM posts p WHERE p.id = ?`, [
+    id
+  ]);
+  return post ? withTags(normalizePost(post)) : null;
+}
+
+export function getPostBySlug(type: PostType, slug: string, onlyPublished = true) {
+  const post = get<PostRecord>(
+    `SELECT ${postSelect("p")} FROM posts p WHERE p.type = ? AND p.slug = ? ${
+      onlyPublished ? "AND p.status = 'published'" : ""
+    }`,
+    [type, slug]
+  );
+  return post ? withTags(normalizePost(post)) : null;
+}
+
+export function getPageBySlug(slug: string) {
+  return getPostBySlug("page", slug, true);
+}
+
+export function withTags(post: PostRecord): PostWithTags {
+  return {
+    ...post,
+    tags: all<TagRecord>(
+      `SELECT t.id, t.slug, t.name
+       FROM tags t
+       INNER JOIN post_tags pt ON pt.tag_id = t.id
+       WHERE pt.post_id = ?
+       ORDER BY t.name ASC`,
+      [post.id]
+    )
+  };
+}
+
+export function getTags() {
+  return all<TagRecord>(
+    `SELECT t.id, t.slug, t.name
+     FROM tags t
+     INNER JOIN post_tags pt ON pt.tag_id = t.id
+     INNER JOIN posts p ON p.id = pt.post_id
+     WHERE p.status = 'published'
+     GROUP BY t.id
+     ORDER BY t.name ASC`
+  );
+}
+
+export function getTagBySlug(slug: string) {
+  return get<TagRecord>("SELECT id, slug, name FROM tags WHERE slug = ?", [slug]);
+}
+
+export function setPostStatus(id: number, status: PostStatus) {
+  const now = new Date().toISOString();
+  const existing = getPostById(id);
+  if (!existing) return null;
+
+  const reason =
+    status === "trashed"
+      ? "trash"
+      : status === "published"
+        ? "publish"
+        : existing.status === "published"
+          ? "unpublish"
+          : "status";
+  createPostRevision(existing, reason);
+
+  const publishedAtSql =
+    status === "published" ? "COALESCE(published_at, ?)" : "published_at";
+  const params =
+    status === "published"
+      ? [status, now, now, id]
+      : [status, now, id];
+  run(
+    `UPDATE posts SET
+      status = ?,
+      published_at = ${publishedAtSql},
+      updated_at = ?
+     WHERE id = ?`,
+    params
+  );
+  return getPostById(id);
+}
+
+export function movePostToTrash(id: number) {
+  return setPostStatus(id, "trashed");
+}
+
+export function restorePostFromTrash(id: number) {
+  return setPostStatus(id, "draft");
+}
+
+export function deletePostPermanently(id: number) {
+  run("DELETE FROM posts WHERE id = ?", [id]);
+}
+
+export function listPostRevisions(postId: number, limit = 20) {
+  return all<PostRevision>(
+    `SELECT ${revisionSelect("r")}
+     FROM post_revisions r
+     WHERE r.post_id = ?
+     ORDER BY r.created_at DESC, r.id DESC
+     LIMIT ?`,
+    [postId, limit]
+  ).map(normalizeRevision);
+}
+
+export function restorePostRevision(postId: number, revisionId: number) {
+  const current = getPostById(postId);
+  const revision = get<PostRevision>(
+    `SELECT ${revisionSelect("r")}
+     FROM post_revisions r
+     WHERE r.id = ? AND r.post_id = ?`,
+    [revisionId, postId]
+  );
+  if (!current || !revision) return null;
+
+  const snapshot = normalizeRevision(revision);
+  const now = new Date().toISOString();
+  const slug = makeUniqueSlug(snapshot.type, snapshot.slug || snapshot.title, postId);
+  const publishedAt = current.publishedAt ?? snapshot.publishedAt ?? null;
+
+  createPostRevision(current, "restore-before");
+  run(
+    `UPDATE posts SET
+      type = ?,
+      slug = ?,
+      title = ?,
+      markdown = ?,
+      excerpt = ?,
+      cover = ?,
+      status = 'draft',
+      published_at = ?,
+      seo_title = ?,
+      seo_description = ?,
+      updated_at = ?
+     WHERE id = ?`,
+    [
+      snapshot.type,
+      slug,
+      snapshot.title,
+      snapshot.markdown,
+      snapshot.excerpt,
+      snapshot.cover,
+      publishedAt,
+      snapshot.seoTitle,
+      snapshot.seoDescription,
+      now,
+      postId
+    ]
+  );
+
+  const restored = getPostById(postId);
+  if (restored) {
+    createPostRevision(restored, "restore");
+  }
+  return restored;
+}
+
+export function getAdjacentPosts(post: PostRecord) {
+  if (!post.publishedAt) return { prev: null, next: null };
+  const prev = get<PostRecord>(
+    `SELECT ${postSelect("p")} FROM posts p
+     WHERE p.type = ? AND p.status = 'published' AND p.id != ?
+       AND COALESCE(p.published_at, p.created_at) < ?
+     ORDER BY COALESCE(p.published_at, p.created_at) DESC LIMIT 1`,
+    [post.type, post.id, post.publishedAt]
+  );
+  const next = get<PostRecord>(
+    `SELECT ${postSelect("p")} FROM posts p
+     WHERE p.type = ? AND p.status = 'published' AND p.id != ?
+       AND COALESCE(p.published_at, p.created_at) > ?
+     ORDER BY COALESCE(p.published_at, p.created_at) ASC LIMIT 1`,
+    [post.type, post.id, post.publishedAt]
+  );
+  return {
+    prev: prev ? normalizePost(prev) : null,
+    next: next ? normalizePost(next) : null
+  };
+}
+
+export function addMedia(input: Omit<MediaRecord, "id" | "createdAt">) {
+  const result = run(
+    "INSERT INTO media (filename, original_name, mime, size, url) VALUES (?, ?, ?, ?, ?)",
+    [input.filename, input.originalName, input.mime, input.size, input.url]
+  );
+  return get<MediaRecord>(
+    "SELECT id, filename, original_name AS originalName, mime, size, url, created_at AS createdAt FROM media WHERE id = ?",
+    [Number(result.lastInsertRowid)]
+  )!;
+}
+
+export function listMedia() {
+  return all<MediaRecord>(
+    "SELECT id, filename, original_name AS originalName, mime, size, url, created_at AS createdAt FROM media ORDER BY id DESC"
+  );
+}
+
+export function addThemeInstall(input: Omit<ThemeInstallRecord, "id" | "createdAt">) {
+  const result = run(
+    `INSERT INTO theme_installs (theme_id, name, version, description, status, issues)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    [
+      input.themeId,
+      input.name,
+      input.version,
+      input.description,
+      input.status,
+      JSON.stringify(input.issues)
+    ]
+  );
+  return get<{
+    id: number;
+    themeId: string;
+    name: string;
+    version: string;
+    description: string;
+    status: "compatible" | "incompatible";
+    issues: string;
+    createdAt: string;
+  }>(
+    `SELECT id, theme_id AS themeId, name, version, description, status,
+      issues, created_at AS createdAt
+     FROM theme_installs WHERE id = ?`,
+    [Number(result.lastInsertRowid)]
+  )!;
+}
+
+export function listThemeInstalls(): ThemeInstallRecord[] {
+  return all<{
+    id: number;
+    themeId: string;
+    name: string;
+    version: string;
+    description: string;
+    status: "compatible" | "incompatible";
+    issues: string;
+    createdAt: string;
+  }>(
+    `SELECT id, theme_id AS themeId, name, version, description, status,
+      issues, created_at AS createdAt
+     FROM theme_installs ORDER BY id DESC`
+  ).map((row) => ({
+    ...row,
+    issues: JSON.parse(row.issues || "[]") as string[]
+  }));
+}
+
+export function dashboardStats() {
+  return {
+    posts: get<CountRow>(
+      "SELECT COUNT(*) AS count FROM posts WHERE type = 'post' AND status != 'trashed'"
+    )!
+      .count,
+    projects: get<CountRow>(
+      "SELECT COUNT(*) AS count FROM posts WHERE type = 'project' AND status != 'trashed'"
+    )!.count,
+    published: get<CountRow>(
+      "SELECT COUNT(*) AS count FROM posts WHERE status = 'published'"
+    )!.count,
+    drafts: get<CountRow>(
+      "SELECT COUNT(*) AS count FROM posts WHERE status = 'draft'"
+    )!.count,
+    trashed: get<CountRow>(
+      "SELECT COUNT(*) AS count FROM posts WHERE status = 'trashed'"
+    )!.count,
+    media: get<CountRow>("SELECT COUNT(*) AS count FROM media")!.count
+  };
+}
+
+export function contentStatusCounts() {
+  const published = get<CountRow>(
+    "SELECT COUNT(*) AS count FROM posts WHERE type != 'page' AND status = 'published'"
+  )!.count;
+  const draft = get<CountRow>(
+    "SELECT COUNT(*) AS count FROM posts WHERE type != 'page' AND status = 'draft'"
+  )!.count;
+  const trashed = get<CountRow>(
+    "SELECT COUNT(*) AS count FROM posts WHERE type != 'page' AND status = 'trashed'"
+  )!.count;
+
+  return {
+    all: published + draft,
+    published,
+    draft,
+    trashed
+  };
+}
+
+export function tagsToInput(post: PostWithTags | null) {
+  return post?.tags.map((tag) => tag.name).join(", ") ?? "";
+}
+
+export function parseTagsInput(input: string) {
+  return splitCommaList(input);
+}

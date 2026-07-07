@@ -1,0 +1,15 @@
+services:
+  manjyun-blog:
+    build: .
+    container_name: manjyun-blog
+    restart: unless-stopped
+    ports:
+      - "4482:3000"
+    environment:
+      NODE_ENV: production
+      DATABASE_PATH: /app/data/manjyun.sqlite
+      UPLOADS_DIR: /app/uploads
+      SITE_URL: http://localhost:4482
+    volumes:
+      - ./data:/app/data
+      - ./uploads:/app/uploads

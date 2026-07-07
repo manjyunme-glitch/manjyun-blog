@@ -1,0 +1,14 @@
+.next/
+node_modules/
+dist/
+coverage/
+test-results/
+playwright-report/
+.docker-tmp/
+tsconfig.tsbuildinfo
+*.log
+data/*.sqlite
+data/*.sqlite-*
+data/auth-secret
+uploads/*
+!uploads/.gitkeep

@@ -1,0 +1,12 @@
+.next/
+node_modules/
+npm-debug.log*
+*.log
+test-results/
+playwright-report/
+tsconfig.tsbuildinfo
+.docker-tmp/
+data/
+uploads/
+manjyun-theme/
+.git/

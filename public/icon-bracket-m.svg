@@ -1,0 +1,6 @@
+<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="ManJyun bracket M mark">
+  <rect x="9" y="9" width="46" height="46" rx="7" fill="#0a0a0a" stroke="#e0ddd5" stroke-opacity=".28" stroke-width="2"/>
+  <path d="M22 18h-7v28h7" fill="none" stroke="#e0ddd5" stroke-width="4" stroke-linecap="square" stroke-linejoin="round"/>
+  <path d="M42 18h7v28h-7" fill="none" stroke="#e0ddd5" stroke-width="4" stroke-linecap="square" stroke-linejoin="round"/>
+  <path d="M24 42V24h5l4 7 4-7h5v18h-5V32l-4 7-4-7v10h-5Z" fill="#e8a84c"/>
+</svg>
