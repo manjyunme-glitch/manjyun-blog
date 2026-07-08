@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { AdminFrame } from "@/components/admin/AdminFrame";
+import { DeploymentStatusCard } from "@/components/admin/DeploymentStatusCard";
 import { requireAdmin } from "@/lib/auth/session";
 import { dashboardStats, listPosts } from "@/lib/db/queries";
 import { formatDate } from "@/lib/content/format";
@@ -24,6 +25,7 @@ export default async function AdminDashboardPage() {
           <div className="stat-card"><strong>{stats.trashed}</strong><span>回收站</span></div>
           <div className="stat-card"><strong>{stats.media}</strong><span>媒体</span></div>
         </section>
+        <DeploymentStatusCard />
         <section className="admin-panel quick-panel">
           <h2 className="section-title">快捷动作</h2>
           <div className="quick-actions">

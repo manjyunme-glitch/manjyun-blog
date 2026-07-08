@@ -47,6 +47,8 @@ mkdir -p /share/DockerData/manjyun-blog/uploads
 - `BLOG_PORT=4482`
 - `SITE_URL`：公开访问地址，生产环境建议填 HTTPS 域名
 - `SESSION_COOKIE_SECURE`：HTTPS 访问可留空；如果只用 `http://NAS_IP:4482` 访问后台，设置为 `false`
+- `GITHUB_REPOSITORY` / `GITHUB_BRANCH`：后台“检查 GitHub 更新”用于查询远端提交，默认是本仓库 `main`
+- `GIT_COMMIT`：当前 Docker 构建对应的提交 SHA。Portainer 不能自动注入时可留空，后台会显示当前部署版本未知，但仍能查询远端
 - `STACK_HTTP_PROXY` / `STACK_HTTPS_PROXY`：Portainer 构建镜像需要代理时再填写
 
 3. 在 Portainer 创建 Git Stack：

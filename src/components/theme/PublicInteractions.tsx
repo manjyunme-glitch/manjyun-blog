@@ -1,9 +1,18 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { usePathname } from "next/navigation";
 
 export function PublicInteractions() {
+  const pathname = usePathname();
   const [visible, setVisible] = useState(false);
+  const pendingTimerRef = useRef<number | null>(null);
+
+  const clearPending = useCallback(() => {
+    document.documentElement.classList.remove("route-pending");
+    if (pendingTimerRef.current) window.clearTimeout(pendingTimerRef.current);
+    pendingTimerRef.current = null;
+  }, []);
 
   useEffect(() => {
     const nav = document.querySelector(".site-nav");
@@ -18,14 +27,10 @@ export function PublicInteractions() {
   }, []);
 
   useEffect(() => {
-    let timer: number | undefined;
+    clearPending();
+  }, [pathname, clearPending]);
 
-    const clearPending = () => {
-      document.documentElement.classList.remove("route-pending");
-      if (timer) window.clearTimeout(timer);
-      timer = undefined;
-    };
-
+  useEffect(() => {
     const onClick = (event: MouseEvent) => {
       if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
         return;
@@ -38,8 +43,8 @@ export function PublicInteractions() {
       if (link.pathname === window.location.pathname && link.hash === window.location.hash) return;
 
       document.documentElement.classList.add("route-pending");
-      if (timer) window.clearTimeout(timer);
-      timer = window.setTimeout(clearPending, 420);
+      if (pendingTimerRef.current) window.clearTimeout(pendingTimerRef.current);
+      pendingTimerRef.current = window.setTimeout(clearPending, 280);
     };
 
     document.addEventListener("click", onClick, true);
@@ -50,7 +55,7 @@ export function PublicInteractions() {
       window.removeEventListener("pageshow", clearPending);
       clearPending();
     };
-  }, []);
+  }, [clearPending]);
 
   return (
     <button
