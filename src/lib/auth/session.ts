@@ -9,6 +9,26 @@ import { getDataDir } from "@/lib/paths";
 const cookieName = "mj_session";
 const maxAgeSeconds = 60 * 60 * 24 * 14;
 
+function parseBooleanEnv(value: string | undefined) {
+  if (value === undefined || value === "") return null;
+  return ["1", "true", "yes", "on"].includes(value.toLowerCase());
+}
+
+function shouldUseSecureCookie() {
+  const configured = parseBooleanEnv(process.env.SESSION_COOKIE_SECURE);
+  if (configured !== null) return configured;
+
+  if (process.env.SITE_URL) {
+    try {
+      return new URL(process.env.SITE_URL).protocol === "https:";
+    } catch {
+      return process.env.NODE_ENV === "production";
+    }
+  }
+
+  return process.env.NODE_ENV === "production";
+}
+
 function getSecret() {
   const envSecret = process.env.AUTH_SECRET;
   if (envSecret) return envSecret;
@@ -59,7 +79,7 @@ export async function setSession(adminId: number) {
   store.set(cookieName, encodeSession(adminId), {
     httpOnly: true,
     sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    secure: shouldUseSecureCookie(),
     path: "/",
     maxAge: maxAgeSeconds
   });

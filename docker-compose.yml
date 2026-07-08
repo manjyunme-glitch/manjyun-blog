@@ -1,15 +1,42 @@
 services:
   manjyun-blog:
-    build: .
-    container_name: manjyun-blog
+    image: ${BLOG_IMAGE:-manjyun-blog:latest}
+    pull_policy: build
+    build:
+      context: .
+      args:
+        HTTP_PROXY: ${STACK_HTTP_PROXY:-}
+        HTTPS_PROXY: ${STACK_HTTPS_PROXY:-}
+        NO_PROXY: ${STACK_NO_PROXY:-}
+        http_proxy: ${STACK_HTTP_PROXY:-}
+        https_proxy: ${STACK_HTTPS_PROXY:-}
+        no_proxy: ${STACK_NO_PROXY:-}
+    container_name: ${CONTAINER_NAME_PREFIX:-mblog}-app
     restart: unless-stopped
     ports:
-      - "4482:3000"
+      - "${BLOG_BIND_IP:-0.0.0.0}:${BLOG_PORT:-4482}:3000"
     environment:
       NODE_ENV: production
+      TZ: ${TZ:-Asia/Shanghai}
+      HOSTNAME: 0.0.0.0
+      PORT: 3000
+      DATA_DIR: /app/data
       DATABASE_PATH: /app/data/manjyun.sqlite
       UPLOADS_DIR: /app/uploads
-      SITE_URL: http://localhost:4482
+      SITE_URL: ${SITE_URL:-http://localhost:4482}
+      AUTH_SECRET: ${AUTH_SECRET:-}
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-}
     volumes:
-      - ./data:/app/data
-      - ./uploads:/app/uploads
+      - ${STACK_BASE_DIR}/data:/app/data
+      - ${STACK_BASE_DIR}/uploads:/app/uploads
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >
+          node -e "fetch('http://127.0.0.1:' + (process.env.PORT || '3000') + '/')
+          .then((r) => process.exit(r.ok ? 0 : 1))
+          .catch(() => process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s

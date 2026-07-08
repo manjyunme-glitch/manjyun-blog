@@ -27,6 +27,43 @@ docker compose up --build
 - `data/`：SQLite 数据库和本地认证 secret
 - `uploads/`：上传的图片、音频和附件
 
+## NAS / Portainer 部署
+
+本仓库可以直接作为 Portainer Git Stack 部署。运行数据放在 NAS 本地目录，不跟随 GitHub 更新覆盖。
+
+1. 在 NAS 上创建持久化目录：
+
+```bash
+mkdir -p /share/DockerData/manjyun-blog/data
+mkdir -p /share/DockerData/manjyun-blog/uploads
+chown -R 1001:1001 /share/DockerData/manjyun-blog/data /share/DockerData/manjyun-blog/uploads
+```
+
+2. 准备环境变量。
+
+从仓库里的 `stack.env.example` 复制一份到本地，按注释填入真实值。至少需要确认：
+
+- `STACK_BASE_DIR=/share/DockerData/manjyun-blog`
+- `BLOG_PORT=4482`
+- `SITE_URL`：公开访问地址，生产环境建议填 HTTPS 域名
+- `SESSION_COOKIE_SECURE`：HTTPS 访问可留空；如果只用 `http://NAS_IP:4482` 访问后台，设置为 `false`
+- `STACK_HTTP_PROXY` / `STACK_HTTPS_PROXY`：Portainer 构建镜像需要代理时再填写
+
+3. 在 Portainer 创建 Git Stack：
+
+- Stacks -> Add stack
+- Build method 选择 Repository
+- Repository URL: `https://github.com/manjyunme-glitch/manjyun-blog.git`
+- Branch: `main`
+- Compose path: `docker-compose.yml`
+- Environment variables: 导入或手动填写本地 `stack.env`
+- 不要启用 `Pull latest image` / `Re-pull image`。`BLOG_IMAGE` 是 NAS 本地构建 tag，不是远程 registry 镜像。
+- Deploy the stack
+
+4. 后续更新。
+
+在 Portainer 的 GitOps / Automatic updates 中选择 Polling 或 Webhook，并保持 `Re-pull image` 关闭。GitHub 更新只会重建应用镜像；`${STACK_BASE_DIR}/data` 和 `${STACK_BASE_DIR}/uploads` 不会被覆盖。
+
 ## 写作语法
 
 正文唯一源格式是 Markdown。除 GFM 基础语法外，支持：

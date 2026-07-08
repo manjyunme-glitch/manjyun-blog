@@ -7,6 +7,12 @@ playwright-report/
 .docker-tmp/
 tsconfig.tsbuildinfo
 *.log
+.env
+.env.*
+!.env.example
+stack.env
+stack.env.*
+!stack.env.example
 data/*.sqlite
 data/*.sqlite-*
 data/auth-secret

@@ -10,3 +10,7 @@ data/
 uploads/
 manjyun-theme/
 .git/
+.env
+.env.*
+stack.env
+stack.env.*
