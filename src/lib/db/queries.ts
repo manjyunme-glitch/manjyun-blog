@@ -1,4 +1,4 @@
-import { all, get, run } from "@/lib/db/client";
+import { all, exec, get, run } from "@/lib/db/client";
 import { slugify, splitCommaList } from "@/lib/content/slug";
 import type {
   HomeModule,
@@ -255,11 +255,12 @@ export function makeUniqueSlug(type: PostType, desired: string, excludeId?: numb
 }
 
 function createPostRevision(post: PostRecord, reason = "save") {
+  const now = new Date().toISOString();
   run(
     `INSERT INTO post_revisions (
       post_id, type, slug, title, markdown, excerpt, cover, status,
-      published_at, seo_title, seo_description, post_created_at, post_updated_at, reason
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      published_at, seo_title, seo_description, post_created_at, post_updated_at, reason, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       post.id,
       post.type,
@@ -274,15 +275,74 @@ function createPostRevision(post: PostRecord, reason = "save") {
       post.seoDescription,
       post.createdAt,
       post.updatedAt,
-      reason
+      reason,
+      now
     ]
   );
+}
+
+function normalizeTagNames(tags: string[]) {
+  return Array.from(new Set(tags.map((tag) => tag.trim()).filter(Boolean))).sort((a, b) =>
+    a.localeCompare(b, "zh-CN")
+  );
+}
+
+function sameTagNames(post: PostWithTags, tagNames: string[]) {
+  const current = normalizeTagNames(post.tags.map((tag) => tag.name));
+  const next = normalizeTagNames(tagNames);
+  return current.length === next.length && current.every((tag, index) => tag === next[index]);
+}
+
+function saveRevisionReason(
+  existing: PostWithTags,
+  next: {
+    type: PostType;
+    slug: string;
+    title: string;
+    markdown: string;
+    excerpt: string | null;
+    cover: string | null;
+    status: PostStatus;
+    publishedAt: string | null;
+    seoTitle: string | null;
+    seoDescription: string | null;
+    tags: string[];
+  }
+) {
+  if (next.status !== existing.status) {
+    if (next.status === "published") return "publish";
+    if (next.status === "draft" && existing.status === "published") return "unpublish";
+    return "status";
+  }
+
+  const contentChanged = existing.markdown !== next.markdown;
+  const titleChanged = existing.title !== next.title || existing.slug !== next.slug;
+  const metaChanged =
+    existing.type !== next.type ||
+    existing.excerpt !== next.excerpt ||
+    existing.cover !== next.cover ||
+    existing.publishedAt !== next.publishedAt ||
+    existing.seoTitle !== next.seoTitle ||
+    existing.seoDescription !== next.seoDescription ||
+    !sameTagNames(existing, next.tags);
+
+  if (contentChanged && (titleChanged || metaChanged)) return "save-content-meta";
+  if (contentChanged) return "save-content";
+  if (titleChanged) return "save-title";
+  if (metaChanged) return "save-meta";
+  return null;
 }
 
 export function savePost(input: SavePostInput) {
   const title = input.title.trim() || "Untitled";
   const now = new Date().toISOString();
   const existing = input.id ? getPostById(input.id) : null;
+  const markdown = input.markdown ?? "";
+  const excerpt = input.excerpt?.trim() || null;
+  const cover = input.cover?.trim() || null;
+  const seoTitle = input.seoTitle?.trim() || null;
+  const seoDescription = input.seoDescription?.trim() || null;
+  const tags = input.tags ?? [];
   const slug = makeUniqueSlug(
     input.type,
     input.slug?.trim() || title,
@@ -294,13 +354,24 @@ export function savePost(input: SavePostInput) {
     (input.status === "published" ? now : null);
 
   let id = input.id;
+  const next = {
+    type: input.type,
+    slug,
+    title,
+    markdown,
+    excerpt,
+    cover,
+    status: input.status,
+    publishedAt,
+    seoTitle,
+    seoDescription,
+    tags
+  };
+
   if (id && existing) {
-    const reason =
-      input.status === "published" && existing.status !== "published"
-        ? "publish"
-        : input.status === "draft" && existing.status === "published"
-          ? "unpublish"
-          : "save";
+    const reason = saveRevisionReason(existing, next);
+    if (!reason) return existing;
+
     createPostRevision(existing, reason);
     run(
       `UPDATE posts SET
@@ -317,16 +388,16 @@ export function savePost(input: SavePostInput) {
         updated_at = ?
       WHERE id = ?`,
       [
-        input.type,
+        next.type,
         slug,
         title,
-        input.markdown ?? "",
-        input.excerpt?.trim() || null,
-        input.cover?.trim() || null,
-        input.status,
+        markdown,
+        excerpt,
+        cover,
+        next.status,
         publishedAt,
-        input.seoTitle?.trim() || null,
-        input.seoDescription?.trim() || null,
+        seoTitle,
+        seoDescription,
         now,
         id
       ]
@@ -338,16 +409,16 @@ export function savePost(input: SavePostInput) {
         published_at, seo_title, seo_description, created_at, updated_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
-        input.type,
+        next.type,
         slug,
         title,
-        input.markdown ?? "",
-        input.excerpt?.trim() || null,
-        input.cover?.trim() || null,
-        input.status,
+        markdown,
+        excerpt,
+        cover,
+        next.status,
         publishedAt,
-        input.seoTitle?.trim() || null,
-        input.seoDescription?.trim() || null,
+        seoTitle,
+        seoDescription,
         now,
         now
       ]
@@ -355,7 +426,7 @@ export function savePost(input: SavePostInput) {
     id = Number(result.lastInsertRowid);
   }
 
-  syncPostTags(id, input.tags ?? []);
+  syncPostTags(id, tags);
   return getPostById(id)!;
 }
 
@@ -478,6 +549,7 @@ export function setPostStatus(id: number, status: PostStatus) {
   const now = new Date().toISOString();
   const existing = getPostById(id);
   if (!existing) return null;
+  if (existing.status === status) return existing;
 
   const reason =
     status === "trashed"
@@ -544,41 +616,47 @@ export function restorePostRevision(postId: number, revisionId: number) {
   const slug = makeUniqueSlug(snapshot.type, snapshot.slug || snapshot.title, postId);
   const publishedAt = current.publishedAt ?? snapshot.publishedAt ?? null;
 
-  createPostRevision(current, "restore-before");
-  run(
-    `UPDATE posts SET
-      type = ?,
-      slug = ?,
-      title = ?,
-      markdown = ?,
-      excerpt = ?,
-      cover = ?,
-      status = 'draft',
-      published_at = ?,
-      seo_title = ?,
-      seo_description = ?,
-      updated_at = ?
-     WHERE id = ?`,
-    [
-      snapshot.type,
-      slug,
-      snapshot.title,
-      snapshot.markdown,
-      snapshot.excerpt,
-      snapshot.cover,
-      publishedAt,
-      snapshot.seoTitle,
-      snapshot.seoDescription,
-      now,
-      postId
-    ]
-  );
-
-  const restored = getPostById(postId);
-  if (restored) {
-    createPostRevision(restored, "restore");
+  exec("BEGIN");
+  try {
+    run(
+      `UPDATE posts SET
+        type = ?,
+        slug = ?,
+        title = ?,
+        markdown = ?,
+        excerpt = ?,
+        cover = ?,
+        status = 'draft',
+        published_at = ?,
+        seo_title = ?,
+        seo_description = ?,
+        updated_at = ?
+       WHERE id = ?`,
+      [
+        snapshot.type,
+        slug,
+        snapshot.title,
+        snapshot.markdown,
+        snapshot.excerpt,
+        snapshot.cover,
+        publishedAt,
+        snapshot.seoTitle,
+        snapshot.seoDescription,
+        now,
+        postId
+      ]
+    );
+    run("DELETE FROM post_revisions WHERE post_id = ? AND id >= ?", [
+      postId,
+      revisionId
+    ]);
+    exec("COMMIT");
+  } catch (error) {
+    exec("ROLLBACK");
+    throw error;
   }
-  return restored;
+
+  return getPostById(postId);
 }
 
 export function getAdjacentPosts(post: PostRecord) {

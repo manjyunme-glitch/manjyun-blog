@@ -19,6 +19,10 @@ function navOffset() {
   return nav.getBoundingClientRect().height + 22;
 }
 
+function tocActivationOffset() {
+  return navOffset() + Math.min(260, window.innerHeight * 0.34);
+}
+
 function scrollWindowTo(
   target: number,
   onDone: () => void,
@@ -102,18 +106,21 @@ export function PostToc({ items }: { items: TocItem[] }) {
         return;
       }
 
-      const anchorLine = window.innerHeight * 0.48;
+      const scrollBottom = window.scrollY + window.innerHeight;
+      const pageBottom = document.documentElement.scrollHeight - 2;
+      if (scrollBottom >= pageBottom) {
+        setActiveId(ids[ids.length - 1]);
+        return;
+      }
+
+      const anchorY = window.scrollY + tocActivationOffset();
       let bestId = ids[0];
-      let bestScore = Number.POSITIVE_INFINITY;
 
       for (const id of ids) {
         const heading = document.getElementById(id);
         if (!heading) continue;
-        const rect = heading.getBoundingClientRect();
-        const visibleBias = rect.top <= window.innerHeight * 0.82 ? 0 : 320;
-        const score = Math.abs(rect.top - anchorLine) + visibleBias;
-        if (score < bestScore) {
-          bestScore = score;
+        const headingTop = heading.getBoundingClientRect().top + window.scrollY;
+        if (headingTop <= anchorY) {
           bestId = id;
         }
       }

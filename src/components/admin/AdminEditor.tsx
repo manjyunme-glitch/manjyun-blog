@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { formatDate } from "@/lib/content/format";
+import { formatDate, formatDateTime } from "@/lib/content/format";
 import type { PostRevision, PostStatus, PostType, PostWithTags } from "@/types/blog";
 
 type EditablePostType = Extract<PostType, "post" | "project">;
@@ -221,7 +221,7 @@ export function AdminEditor({
       setDraft(draftFromPost(data.post));
       setRevisionItems(data.revisions);
       setSelectedRevisionId(data.revisions[0]?.id ?? null);
-      setMessage("已恢复为草稿");
+      setMessage("已回退为草稿");
       router.refresh();
     });
   }
@@ -366,7 +366,7 @@ export function AdminEditor({
             {revisionItems.length ? (
               <>
                 <div className="revision-list">
-                  {revisionItems.map((revision) => (
+                  {revisionItems.map((revision, index) => (
                     <button
                       key={revision.id}
                       className={`revision-item ${selectedRevisionId === revision.id ? "is-active" : ""}`}
@@ -375,7 +375,7 @@ export function AdminEditor({
                       onClick={() => setSelectedRevisionId(revision.id)}
                     >
                       <span>
-                        <strong>{revisionReasonText(revision.reason)}</strong>
+                        <strong>{revisionVersionLabel(revision, index, revisionItems.length)}</strong>
                         <small>{formatRevisionTime(revision.createdAt)}</small>
                       </span>
                       <span className={`status-pill ${revision.status}`}>
@@ -388,6 +388,9 @@ export function AdminEditor({
                   <div className="revision-preview">
                     <div className="revision-preview-head">
                       <strong>{selectedRevision.title}</strong>
+                      <small>
+                        {revisionReasonText(selectedRevision.reason)} · {formatRevisionTime(selectedRevision.createdAt)}
+                      </small>
                       <code>{selectedRevision.slug}</code>
                     </div>
                     <pre>{selectedRevision.markdown.slice(0, 680) || "空内容"}</pre>
@@ -491,24 +494,28 @@ function typeText(type: EditablePostType) {
 
 function revisionReasonText(reason: string) {
   const labels: Record<string, string> = {
-    publish: "发布前",
-    unpublish: "取消发布前",
+    publish: "发布前版本",
+    unpublish: "取消发布前版本",
     trash: "移入回收站前",
-    restore: "恢复版本",
-    "restore-before": "恢复前",
+    restore: "恢复记录",
+    "restore-before": "恢复前版本",
     status: "状态变更前",
-    save: "保存前"
+    "save-content": "正文修改前",
+    "save-title": "标题修改前",
+    "save-meta": "信息修改前",
+    "save-content-meta": "正文和信息修改前",
+    save: "保存前版本"
   };
-  return labels[reason] ?? "保存前";
+  return labels[reason] ?? "保存前版本";
+}
+
+function revisionVersionLabel(revision: PostRevision, index: number, total: number) {
+  const versionNumber = Math.max(1, total - index);
+  return `版本 ${versionNumber} · ${revisionReasonText(revision.reason)}`;
 }
 
 function formatRevisionTime(input: string) {
-  return new Intl.DateTimeFormat("zh-CN", {
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit"
-  }).format(new Date(input));
+  return `${formatDateTime(input)} 北京时间`;
 }
 
 function WritingHelp() {

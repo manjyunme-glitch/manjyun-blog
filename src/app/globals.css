@@ -123,21 +123,6 @@ img {
   transition: border-color 0.25s var(--ease), background 0.25s var(--ease);
 }
 
-.site-nav::after {
-  content: "";
-  position: absolute;
-  right: 0;
-  bottom: -1px;
-  left: 0;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, var(--accent), transparent);
-  opacity: 0;
-  pointer-events: none;
-  transform: scaleX(0.12);
-  transform-origin: left center;
-  transition: transform 180ms var(--ease), opacity 120ms var(--ease);
-}
-
 .site-nav.is-scrolled {
   border-bottom-color: var(--border);
   background: rgba(10, 10, 10, 0.9);
@@ -1339,6 +1324,7 @@ img {
 .btn-row {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 0.5rem;
 }
 
@@ -1786,11 +1772,13 @@ img {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 360px;
   gap: 1rem;
+  align-items: start;
 }
 
 .editor-main {
   display: grid;
   gap: 1rem;
+  align-content: start;
 }
 
 .editor-toolbar {
@@ -1919,6 +1907,10 @@ img {
   gap: 0.15rem;
 }
 
+.revision-item .status-pill {
+  flex: 0 0 auto;
+}
+
 .revision-item strong {
   color: var(--text);
   font-family: var(--mono);
@@ -1950,6 +1942,12 @@ img {
   font-weight: 600;
 }
 
+.revision-preview-head small {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 0.66rem;
+}
+
 .revision-preview-head code {
   color: var(--muted);
   font-family: var(--mono);
@@ -1969,6 +1967,10 @@ img {
   font-size: 0.7rem;
   line-height: 1.58;
   white-space: pre-wrap;
+}
+
+.revision-preview .btn {
+  justify-self: stretch;
 }
 
 .media-grid {
@@ -2056,18 +2058,34 @@ img {
 @keyframes terminal-enter {
   from {
     opacity: 0;
-    filter: blur(4px);
-    transform: translateY(10px);
+    transform: translate3d(0, 8px, 0);
   }
 
   to {
     opacity: 1;
-    filter: blur(0);
-    transform: translateY(0);
+    transform: translate3d(0, 0, 0);
   }
 }
 
+@view-transition {
+  navigation: auto;
+}
+
 @media (prefers-reduced-motion: no-preference) {
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation-duration: 140ms;
+    animation-timing-function: var(--ease);
+  }
+
+  ::view-transition-old(root) {
+    animation-name: route-fade-out;
+  }
+
+  ::view-transition-new(root) {
+    animation-name: route-enter;
+  }
+
   .hero .prompt-block,
   .hero .site-title,
   .hero .hero-bio,
@@ -2092,27 +2110,30 @@ img {
     --enter-delay: 210ms;
   }
 
-  html.route-pending .site-nav::after {
+  main {
+    animation: route-enter 140ms var(--ease) both;
+  }
+}
+
+@keyframes route-fade-out {
+  from {
     opacity: 1;
-    transform: scaleX(1);
   }
 
-  main {
-    animation: route-enter 180ms var(--ease) both;
+  to {
+    opacity: 0.96;
   }
 }
 
 @keyframes route-enter {
   from {
-    opacity: 0.98;
-    transform: translate3d(0, 4px, 0);
-    clip-path: inset(0 0 8px 0);
+    opacity: 0.96;
+    transform: translate3d(0, 3px, 0);
   }
 
   to {
     opacity: 1;
     transform: translate3d(0, 0, 0);
-    clip-path: inset(0 0 0 0);
   }
 }
 

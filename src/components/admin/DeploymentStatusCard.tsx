@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { formatDateTime as formatBeijingDateTime } from "@/lib/content/format";
 
 type CommitInfo = {
   sha: string | null;
@@ -37,15 +38,8 @@ const initialCurrent: CommitInfo = {
   source: "unknown"
 };
 
-function formatDateTime(input: string | null) {
-  if (!input) return "时间未知";
-  return new Intl.DateTimeFormat("zh-CN", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit"
-  }).format(new Date(input));
+function formatCommitDateTime(input: string | null) {
+  return input ? formatBeijingDateTime(input) : "时间未知";
 }
 
 function stateLabel(status: DeploymentStatus | null, pending: boolean, error: string) {
@@ -99,7 +93,7 @@ function VersionCard({
       )}
       <p>{data.message}</p>
       <small>
-        {formatDateTime(data.committedAt)} · {sourceLabel(data.source)}
+        {formatCommitDateTime(data.committedAt)} · {sourceLabel(data.source)}
       </small>
     </div>
   );
@@ -164,7 +158,7 @@ export function DeploymentStatusCard() {
       ) : null}
 
       <footer className="deployment-footer">
-        <span>检查时间: {status ? formatDateTime(status.checkedAt) : "尚未检查"}</span>
+        <span>检查时间: {status ? formatBeijingDateTime(status.checkedAt) : "尚未检查"}</span>
         <a href={status?.commitsUrl ?? "https://github.com/manjyunme-glitch/manjyun-blog/commits/main"} target="_blank" rel="noreferrer">
           查看提交记录
         </a>

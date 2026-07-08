@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-test("post publishing keeps first published time and revisions restore to draft", async () => {
+test("post publishing keeps first published time and revisions restore linearly", async () => {
   const root = mkdtempSync(path.join(tmpdir(), "manjyun-db-"));
   process.env.DATA_DIR = root;
   process.env.UPLOADS_DIR = path.join(root, "uploads");
@@ -51,4 +51,13 @@ test("post publishing keeps first published time and revisions restore to draft"
   assert.equal(restored?.markdown, "original body");
   assert.equal(restored?.status, "draft");
   assert.equal(restored?.publishedAt, firstPublishedAt);
+
+  const revisionsAfterRestore = listPostRevisions(published.id);
+  assert.ok(
+    revisionsAfterRestore.every((revision) => revision.id < originalRevision.id)
+  );
+  assert.equal(
+    revisionsAfterRestore.some((revision) => revision.reason.startsWith("restore")),
+    false
+  );
 });
