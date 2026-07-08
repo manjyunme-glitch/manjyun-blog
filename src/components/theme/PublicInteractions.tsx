@@ -15,27 +15,15 @@ export function PublicInteractions() {
   }, []);
 
   useEffect(() => {
-    const nav = document.querySelector<HTMLElement>(".site-nav");
-    document.documentElement.classList.add("scroll-nav-enabled");
+    const nav = document.querySelector(".site-nav");
     const update = () => {
       const active = window.scrollY > window.innerHeight * 0.28;
       setVisible(active);
-      nav?.classList.toggle("is-visible", active);
-      nav?.classList.toggle("is-scrolled", active);
-      if (active) {
-        nav?.removeAttribute("aria-hidden");
-        nav?.removeAttribute("inert");
-      } else {
-        nav?.setAttribute("aria-hidden", "true");
-        nav?.setAttribute("inert", "");
-      }
+      nav?.classList.toggle("is-scrolled", window.scrollY > 8);
     };
     update();
     window.addEventListener("scroll", update, { passive: true });
-    return () => {
-      window.removeEventListener("scroll", update);
-      document.documentElement.classList.remove("scroll-nav-enabled");
-    };
+    return () => window.removeEventListener("scroll", update);
   }, []);
 
   useEffect(() => {

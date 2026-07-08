@@ -57,6 +57,7 @@ function scrollWindowTo(
 
 export function PostToc({ items }: { items: TocItem[] }) {
   const [activeId, setActiveId] = useState(items[0]?.id ?? "");
+  const [visible, setVisible] = useState(false);
   const [indicator, setIndicator] = useState({
     top: 0,
     height: 22,
@@ -74,6 +75,20 @@ export function PostToc({ items }: { items: TocItem[] }) {
   const lastIndicatorMoveAtRef = useRef(0);
   const programmaticTargetRef = useRef("");
   const ids = useMemo(() => items.map((item) => item.id), [items]);
+
+  useEffect(() => {
+    const update = () => {
+      setVisible(window.scrollY > window.innerHeight * 0.28);
+    };
+
+    update();
+    window.addEventListener("scroll", update, { passive: true });
+    window.addEventListener("resize", update);
+    return () => {
+      window.removeEventListener("scroll", update);
+      window.removeEventListener("resize", update);
+    };
+  }, []);
 
   useEffect(() => {
     if (!ids.length) return;
@@ -255,7 +270,11 @@ export function PostToc({ items }: { items: TocItem[] }) {
       >
         目录
       </button>
-      <nav className={`toc ${open ? "is-open" : ""}`} aria-label="Article sections">
+      <nav
+        className={`toc ${open ? "is-open" : ""} ${visible ? "is-visible" : ""}`}
+        aria-label="Article sections"
+        aria-hidden={!visible && !open}
+      >
         <div className="toc-title">
           <span>目录</span>
           <button
