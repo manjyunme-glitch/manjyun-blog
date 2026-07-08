@@ -36,7 +36,6 @@ docker compose up --build
 ```bash
 mkdir -p /share/DockerData/manjyun-blog/data
 mkdir -p /share/DockerData/manjyun-blog/uploads
-chown -R 1001:1001 /share/DockerData/manjyun-blog/data /share/DockerData/manjyun-blog/uploads
 ```
 
 2. 准备环境变量。
@@ -44,6 +43,7 @@ chown -R 1001:1001 /share/DockerData/manjyun-blog/data /share/DockerData/manjyun
 从仓库里的 `stack.env.example` 复制一份到本地，按注释填入真实值。至少需要确认：
 
 - `STACK_BASE_DIR=/share/DockerData/manjyun-blog`
+- `BLOG_UID=0`、`BLOG_GID=0`：默认用 root 运行以适配 NAS bind mount，避免 SQLite 无法写入。若已手动 `chown -R 1001:1001 /share/DockerData/manjyun-blog/data /share/DockerData/manjyun-blog/uploads`，可改成 `1001`
 - `BLOG_PORT=4482`
 - `SITE_URL`：公开访问地址，生产环境建议填 HTTPS 域名
 - `SESSION_COOKIE_SECURE`：HTTPS 访问可留空；如果只用 `http://NAS_IP:4482` 访问后台，设置为 `false`
