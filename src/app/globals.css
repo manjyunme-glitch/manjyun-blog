@@ -109,29 +109,64 @@ img {
 
 .site-nav {
   position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
+  top: 0.85rem;
+  left: 50%;
   z-index: 100;
   display: flex;
+  width: min(940px, calc(100vw - 3rem));
   align-items: center;
   justify-content: space-between;
-  padding: 0.9rem 2rem;
-  border-bottom: 1px solid transparent;
-  background: rgba(10, 10, 10, 0.82);
-  backdrop-filter: blur(12px) saturate(1.2);
-  -webkit-backdrop-filter: blur(12px) saturate(1.2);
-  transition: border-color 0.25s var(--ease), background 0.25s var(--ease);
+  padding: 0.58rem 1.2rem;
+  background: transparent;
+  transform: translateX(-50%);
+  transition: opacity 0.24s var(--ease), transform 0.24s var(--ease),
+    visibility 0.24s var(--ease);
+}
+
+.scroll-nav-enabled .site-nav {
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, -0.7rem);
+  visibility: hidden;
+}
+
+.scroll-nav-enabled .site-nav.is-visible {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translate(-50%, 0);
+  visibility: visible;
+}
+
+.site-nav::before {
+  content: "";
+  position: absolute;
+  inset: -0.35rem -2.2rem;
+  z-index: -1;
+  background:
+    radial-gradient(70% 140% at 50% 0%, rgba(232, 168, 76, 0.1), transparent 58%),
+    linear-gradient(
+      90deg,
+      transparent,
+      rgba(10, 10, 10, 0.62) 16%,
+      rgba(10, 10, 10, 0.78) 50%,
+      rgba(10, 10, 10, 0.62) 84%,
+      transparent
+    );
+  -webkit-backdrop-filter: blur(14px) saturate(1.16);
+  backdrop-filter: blur(14px) saturate(1.16);
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 14%, #000 86%, transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 14%, #000 86%, transparent);
+  pointer-events: none;
 }
 
 .site-nav::after {
   content: "";
   position: absolute;
-  right: 0;
-  bottom: -1px;
-  left: 0;
+  right: 8%;
+  bottom: -0.28rem;
+  left: 8%;
   height: 1px;
-  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  background: linear-gradient(90deg, transparent, rgba(232, 168, 76, 0.86), transparent);
   opacity: 0;
   pointer-events: none;
   transform: scaleX(0.12);
@@ -140,12 +175,12 @@ img {
 }
 
 .site-nav.is-scrolled {
-  border-bottom-color: var(--border);
-  background: rgba(10, 10, 10, 0.9);
+  color: var(--text);
 }
 
 .nav-brand {
   display: inline-flex;
+  flex: 0 0 auto;
   align-items: center;
   gap: 0;
   color: var(--text);
@@ -2163,16 +2198,24 @@ img {
 
 @media (max-width: 860px) {
   .site-nav {
-    position: relative;
-    padding: 0.8rem 1.3rem;
-    backdrop-filter: none;
-    -webkit-backdrop-filter: none;
-    background: var(--bg);
+    top: 0.55rem;
+    width: calc(100vw - 1rem);
+    padding: 0.5rem 0.74rem;
   }
 
   .public-wrap {
     width: calc(100vw - 2.6rem);
     padding-top: 1.6rem;
+  }
+
+  .nav-links {
+    min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .nav-links::-webkit-scrollbar {
+    display: none;
   }
 
   .post-row {
