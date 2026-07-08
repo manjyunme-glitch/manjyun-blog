@@ -1,11 +1,13 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { formatDate, formatDateTime } from "@/lib/content/format";
 import type { PostRevision, PostStatus, PostType, PostWithTags } from "@/types/blog";
 
 type EditablePostType = Extract<PostType, "post" | "project">;
+type RevisionFilter = "all" | Extract<PostStatus, "published" | "draft">;
 
 type Draft = {
   id?: number;
@@ -22,6 +24,12 @@ type Draft = {
 };
 
 const emptyRevisions: PostRevision[] = [];
+
+const revisionFilters: Array<{ id: RevisionFilter; label: string }> = [
+  { id: "all", label: "全部" },
+  { id: "published", label: "已发布" },
+  { id: "draft", label: "草稿" }
+];
 
 const starterMarkdown = `这里写 Markdown 正文。标题请填写在右侧“标题”字段中，正文从这里开始。
 
@@ -50,10 +58,14 @@ function draftFromPost(post: PostWithTags | null): Draft {
 
 export function AdminEditor({
   post,
-  revisions = emptyRevisions
+  revisions = emptyRevisions,
+  backHref = "/admin/posts",
+  backLabel = "返回文章列表"
 }: {
   post: PostWithTags | null;
   revisions?: PostRevision[];
+  backHref?: string;
+  backLabel?: string;
 }) {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -64,6 +76,7 @@ export function AdminEditor({
   const [helpOpen, setHelpOpen] = useState(false);
   const [draft, setDraft] = useState<Draft>(() => draftFromPost(post));
   const [revisionItems, setRevisionItems] = useState<PostRevision[]>(revisions);
+  const [revisionFilter, setRevisionFilter] = useState<RevisionFilter>("all");
   const [selectedRevisionId, setSelectedRevisionId] = useState<number | null>(
     revisions[0]?.id ?? null
   );
@@ -98,10 +111,36 @@ export function AdminEditor({
     });
   }, [revisions]);
 
-  const selectedRevision = useMemo(
-    () => revisionItems.find((revision) => revision.id === selectedRevisionId) ?? null,
-    [revisionItems, selectedRevisionId]
+  const revisionCounts = useMemo(
+    () => ({
+      all: revisionItems.length,
+      published: revisionItems.filter((revision) => revision.status === "published").length,
+      draft: revisionItems.filter((revision) => revision.status === "draft").length
+    }),
+    [revisionItems]
   );
+
+  const visibleRevisions = useMemo(
+    () =>
+      revisionFilter === "all"
+        ? revisionItems
+        : revisionItems.filter((revision) => revision.status === revisionFilter),
+    [revisionFilter, revisionItems]
+  );
+
+  const selectedRevision = useMemo(
+    () => visibleRevisions.find((revision) => revision.id === selectedRevisionId) ?? null,
+    [selectedRevisionId, visibleRevisions]
+  );
+
+  useEffect(() => {
+    setSelectedRevisionId((current) => {
+      if (current && visibleRevisions.some((revision) => revision.id === current)) {
+        return current;
+      }
+      return visibleRevisions[0]?.id ?? null;
+    });
+  }, [visibleRevisions]);
 
   function update<K extends keyof Draft>(key: K, value: Draft[K]) {
     setDraft((current) => ({ ...current, [key]: value }));
@@ -160,7 +199,7 @@ export function AdminEditor({
         setMessage("删除失败");
         return;
       }
-      router.push("/admin/posts?status=trash");
+      router.push("/admin/posts?status=trashed");
     });
   }
 
@@ -189,7 +228,7 @@ export function AdminEditor({
       setDraft((current) => ({ ...current, status: data.status }));
       setMessage(action === "trash" ? "已移到回收站" : "已恢复为草稿");
       if (action === "trash") {
-        router.push("/admin/posts?status=trash");
+        router.push("/admin/posts?status=trashed");
       } else {
         router.refresh();
       }
@@ -198,8 +237,19 @@ export function AdminEditor({
 
   async function restoreRevision(revisionId: number) {
     if (!draft.id) return;
+    const targetRevision = revisionItems.find((revision) => revision.id === revisionId);
+    if (!targetRevision) return;
+    if (
+      targetRevision.status !== draft.status &&
+      !window.confirm(
+        `这会把当前内容回退为“${statusText(targetRevision.status, false)}”状态，确定继续？`
+      )
+    ) {
+      return;
+    }
+
     setMessage("");
-    await runPending("恢复失败", async () => {
+    await runPending("回退失败", async () => {
       const response = await fetch(`${endpoint}/revisions`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -214,14 +264,14 @@ export function AdminEditor({
         | { ok: false; error: string }
         | null;
       if (!response.ok || !data?.ok) {
-        setMessage(data && !data.ok ? data.error : "恢复失败");
+        setMessage(data && !data.ok ? data.error : "回退失败");
         return;
       }
 
       setDraft(draftFromPost(data.post));
       setRevisionItems(data.revisions);
       setSelectedRevisionId(data.revisions[0]?.id ?? null);
-      setMessage("已回退为草稿");
+      setMessage(`已回退为${statusText(data.post.status, false)}`);
       router.refresh();
     });
   }
@@ -281,6 +331,9 @@ export function AdminEditor({
             )}
           </div>
           <div className="btn-row">
+            <Link className="btn ghost" href={backHref}>
+              {backLabel}
+            </Link>
             {draft.status === "trashed" ? (
               <>
                 <button className="btn primary" type="button" disabled={pending} onClick={() => void patchStatus("restore")}>
@@ -365,8 +418,23 @@ export function AdminEditor({
             </div>
             {revisionItems.length ? (
               <>
+                <div className="revision-tabs" role="tablist" aria-label="版本状态筛选">
+                  {revisionFilters.map((filter) => (
+                    <button
+                      key={filter.id}
+                      className={`seg-btn ${revisionFilter === filter.id ? "is-active" : ""}`}
+                      type="button"
+                      role="tab"
+                      aria-selected={revisionFilter === filter.id}
+                      onClick={() => setRevisionFilter(filter.id)}
+                    >
+                      {filter.label}
+                      <span>{revisionCounts[filter.id]}</span>
+                    </button>
+                  ))}
+                </div>
                 <div className="revision-list">
-                  {revisionItems.map((revision, index) => (
+                  {visibleRevisions.map((revision, index) => (
                     <button
                       key={revision.id}
                       className={`revision-item ${selectedRevisionId === revision.id ? "is-active" : ""}`}
@@ -375,7 +443,7 @@ export function AdminEditor({
                       onClick={() => setSelectedRevisionId(revision.id)}
                     >
                       <span>
-                        <strong>{revisionVersionLabel(revision, index, revisionItems.length)}</strong>
+                        <strong>{revisionVersionLabel(revision, index, visibleRevisions.length)}</strong>
                         <small>{formatRevisionTime(revision.createdAt)}</small>
                       </span>
                       <span className={`status-pill ${revision.status}`}>
@@ -400,10 +468,12 @@ export function AdminEditor({
                       disabled={pending}
                       onClick={() => void restoreRevision(selectedRevision.id)}
                     >
-                      恢复为草稿
+                      回退为{statusText(selectedRevision.status, false)}版本
                     </button>
                   </div>
-                ) : null}
+                ) : visibleRevisions.length ? null : (
+                  <p className="empty-state">这个状态下暂无历史版本。</p>
+                )}
               </>
             ) : (
               <p className="empty-state">暂无历史版本。</p>
@@ -511,7 +581,7 @@ function revisionReasonText(reason: string) {
 
 function revisionVersionLabel(revision: PostRevision, index: number, total: number) {
   const versionNumber = Math.max(1, total - index);
-  return `版本 ${versionNumber} · ${revisionReasonText(revision.reason)}`;
+  return `${statusText(revision.status, false)}版本 ${versionNumber} · ${revisionReasonText(revision.reason)}`;
 }
 
 function formatRevisionTime(input: string) {

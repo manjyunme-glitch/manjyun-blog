@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import Link from "next/link";
 import { AdminFrame } from "@/components/admin/AdminFrame";
 import { AdminEditor } from "@/components/admin/AdminEditor";
 import { requireAdmin } from "@/lib/auth/session";
@@ -18,6 +19,10 @@ const statusLabels = {
   trashed: "回收站"
 } as const;
 
+function statusHref(status: keyof typeof statusLabels) {
+  return `/admin/posts?status=${status}`;
+}
+
 export default async function EditPostPage({
   params
 }: {
@@ -28,10 +33,28 @@ export default async function EditPostPage({
   const post = getPostById(Number(id));
   if (!post) notFound();
   const revisions = listPostRevisions(post.id);
+  const returnHref = statusHref(post.status);
+  const returnLabel = `返回${statusLabels[post.status]}列表`;
 
   return (
-    <AdminFrame title={post.title} subtitle={`${typeLabels[post.type]} / ${statusLabels[post.status]}`}>
-      <AdminEditor post={post} revisions={revisions} />
+    <AdminFrame
+      title={post.title}
+      subtitle={`${typeLabels[post.type]} / ${statusLabels[post.status]}`}
+      breadcrumbs={[
+        { label: "概览", href: "/admin" },
+        { label: "文章", href: "/admin/posts" },
+        { label: statusLabels[post.status], href: returnHref },
+        { label: post.title }
+      ]}
+      activeNav={returnHref}
+      action={
+        <div className="btn-row">
+          <Link className="btn" href={returnHref}>{returnLabel}</Link>
+          <Link className="btn ghost" href="/admin/posts">全部文章</Link>
+        </div>
+      }
+    >
+      <AdminEditor post={post} revisions={revisions} backHref={returnHref} backLabel={returnLabel} />
     </AdminFrame>
   );
 }

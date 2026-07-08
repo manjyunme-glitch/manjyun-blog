@@ -1161,7 +1161,21 @@ img {
 
 .admin-menu {
   display: grid;
+  gap: 0.75rem;
+}
+
+.admin-menu-group {
+  display: grid;
   gap: 0.25rem;
+}
+
+.admin-menu-label {
+  padding: 0 0.62rem;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  letter-spacing: 0;
+  text-transform: uppercase;
 }
 
 .admin-menu a,
@@ -1186,6 +1200,7 @@ img {
 }
 
 .admin-menu a:hover,
+.admin-menu a.is-active,
 .admin-menu button:hover,
 .admin-topbar a:hover {
   border-color: var(--border);
@@ -1193,9 +1208,44 @@ img {
   color: var(--text);
 }
 
+.admin-menu a.is-active {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
 .admin-main {
   min-width: 0;
   padding: 1.15rem;
+}
+
+.admin-breadcrumbs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.32rem;
+  margin-bottom: 0.64rem;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 0.68rem;
+}
+
+.admin-breadcrumbs a {
+  color: var(--text-soft);
+}
+
+.admin-breadcrumbs a:hover {
+  color: var(--text);
+}
+
+.admin-breadcrumbs a::after {
+  content: "/";
+  margin-left: 0.32rem;
+  color: var(--border-strong);
+}
+
+.admin-breadcrumbs span {
+  color: var(--muted);
 }
 
 .admin-topbar {
@@ -1877,6 +1927,21 @@ img {
   gap: 0.45rem;
   overflow: auto;
   padding-right: 0.15rem;
+}
+
+.revision-tabs {
+  display: inline-flex;
+  width: 100%;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  padding: 0.25rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.revision-tabs .seg-btn {
+  flex: 1 1 88px;
 }
 
 .revision-item {

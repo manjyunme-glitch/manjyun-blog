@@ -614,7 +614,10 @@ export function restorePostRevision(postId: number, revisionId: number) {
   const snapshot = normalizeRevision(revision);
   const now = new Date().toISOString();
   const slug = makeUniqueSlug(snapshot.type, snapshot.slug || snapshot.title, postId);
-  const publishedAt = current.publishedAt ?? snapshot.publishedAt ?? null;
+  const publishedAt =
+    snapshot.status === "published"
+      ? (current.publishedAt ?? snapshot.publishedAt ?? now)
+      : (current.publishedAt ?? snapshot.publishedAt ?? null);
 
   exec("BEGIN");
   try {
@@ -626,7 +629,7 @@ export function restorePostRevision(postId: number, revisionId: number) {
         markdown = ?,
         excerpt = ?,
         cover = ?,
-        status = 'draft',
+        status = ?,
         published_at = ?,
         seo_title = ?,
         seo_description = ?,
@@ -639,6 +642,7 @@ export function restorePostRevision(postId: number, revisionId: number) {
         snapshot.markdown,
         snapshot.excerpt,
         snapshot.cover,
+        snapshot.status,
         publishedAt,
         snapshot.seoTitle,
         snapshot.seoDescription,
