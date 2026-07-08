@@ -312,6 +312,8 @@ function Post(props: ThemePostProps) {
         ← cd {post.type === "project" ? "/projects" : "/posts"}
       </Link>
       <article className={`article ${hasToc ? "article-with-toc" : ""}`}>
+        {hasToc ? <PostToc items={rendered.toc} /> : null}
+
         <div className="article-main">
           <header className="article-header">
             <div className="article-meta">
@@ -371,8 +373,6 @@ function Post(props: ThemePostProps) {
             </div>
           </footer>
         </div>
-
-        {hasToc ? <PostToc items={rendered.toc} /> : null}
       </article>
     </Shell>
   );

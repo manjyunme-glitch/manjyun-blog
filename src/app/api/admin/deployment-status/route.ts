@@ -1,4 +1,6 @@
 import { execFile } from "node:child_process";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { promisify } from "node:util";
 import { NextResponse } from "next/server";
 import { requireAdminForApi } from "@/lib/auth/session";
@@ -10,7 +12,7 @@ const execFileAsync = promisify(execFile);
 const defaultRepository = "manjyunme-glitch/manjyun-blog";
 const unknownCommit = "unknown";
 
-type CommitSource = "env" | "git" | "github" | "unknown";
+type CommitSource = "env" | "build" | "git" | "github" | "unknown";
 
 type CommitInfo = {
   sha: string | null;
@@ -31,6 +33,12 @@ type GitHubCommitResponse = {
     committer?: { date?: string };
     author?: { date?: string };
   };
+};
+
+type BuildInfo = {
+  gitCommit?: string;
+  source?: string;
+  builtAt?: string;
 };
 
 function cleanCommit(value: string | undefined) {
@@ -87,6 +95,30 @@ async function currentFromGit(): Promise<CommitInfo | null> {
   }
 }
 
+async function commitInfoFromSha(
+  repository: string,
+  sha: string,
+  source: CommitSource
+): Promise<CommitInfo> {
+  const githubData = await githubCommit(repository, sha).catch(() => null);
+  const resolvedSha = githubData?.sha ?? sha;
+  return {
+    sha: resolvedSha,
+    shortSha: shortSha(resolvedSha),
+    message: githubData
+      ? firstLine(githubData.commit.message)
+      : source === "build"
+        ? "Build commit metadata"
+        : "No commit message",
+    committedAt:
+      githubData?.commit.committer?.date ??
+      githubData?.commit.author?.date ??
+      null,
+    url: githubData?.html_url ?? `https://github.com/${repository}/commit/${sha}`,
+    source
+  };
+}
+
 async function currentFromEnv(repository: string): Promise<CommitInfo | null> {
   const sha = cleanCommit(
     process.env.GIT_COMMIT ??
@@ -98,18 +130,19 @@ async function currentFromEnv(repository: string): Promise<CommitInfo | null> {
   );
   if (!sha) return null;
 
-  const githubData = await githubCommit(repository, sha).catch(() => null);
-  return {
-    sha: githubData?.sha ?? sha,
-    shortSha: shortSha(githubData?.sha ?? sha),
-    message: firstLine(githubData?.commit.message),
-    committedAt:
-      githubData?.commit.committer?.date ??
-      githubData?.commit.author?.date ??
-      null,
-    url: githubData?.html_url ?? `https://github.com/${repository}/commit/${sha}`,
-    source: "env"
-  };
+  return commitInfoFromSha(repository, sha, "env");
+}
+
+async function currentFromBuildInfo(repository: string): Promise<CommitInfo | null> {
+  try {
+    const raw = await readFile(join(process.cwd(), ".build-info.json"), "utf8");
+    const data = JSON.parse(raw) as BuildInfo;
+    const sha = cleanCommit(data.gitCommit);
+    if (!sha) return null;
+    return commitInfoFromSha(repository, sha, "build");
+  } catch {
+    return null;
+  }
 }
 
 async function githubCommit(repository: string, ref: string) {
@@ -144,7 +177,7 @@ function unknownCurrent(): CommitInfo {
   return {
     sha: null,
     shortSha: unknownCommit,
-    message: "No build commit found",
+    message: "Build commit metadata missing",
     committedAt: null,
     url: null,
     source: "unknown"
@@ -163,6 +196,7 @@ export async function GET() {
 
   const current =
     (await currentFromEnv(repository)) ??
+    (await currentFromBuildInfo(repository)) ??
     (await currentFromGit()) ??
     unknownCurrent();
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { formatDate } from "@/lib/content/format";
 import type { PostRevision, PostStatus, PostType, PostWithTags } from "@/types/blog";
@@ -21,9 +21,7 @@ type Draft = {
   seoDescription: string;
 };
 
-const starterMarkdown = `# 第一篇文章
-
-这里写 Markdown 正文。支持 GFM 表格、代码块、图片、音频卡片和 callout。
+const starterMarkdown = `这里写 Markdown 正文。标题请填写在右侧“标题”字段中，正文从这里开始。
 
 ## 小标题
 
@@ -57,7 +55,8 @@ export function AdminEditor({
 }) {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const [pending, startTransition] = useTransition();
+  const pendingRef = useRef(false);
+  const [pending, setPending] = useState(false);
   const [message, setMessage] = useState("");
   const [preview, setPreview] = useState("");
   const [helpOpen, setHelpOpen] = useState(false);
@@ -106,24 +105,44 @@ export function AdminEditor({
     setDraft((current) => ({ ...current, [key]: value }));
   }
 
+  async function runPending(fallbackMessage: string, task: () => Promise<void>) {
+    if (pendingRef.current) return;
+
+    pendingRef.current = true;
+    setPending(true);
+    try {
+      await task();
+    } catch (issue) {
+      setMessage(issue instanceof Error ? issue.message : fallbackMessage);
+    } finally {
+      pendingRef.current = false;
+      setPending(false);
+    }
+  }
+
   async function save(status: PostStatus, successMessage?: string) {
     setMessage("");
-    startTransition(async () => {
-      const response = await fetch(endpoint, {
-        method: draft.id ? "PUT" : "POST",
+    const wasNew = !draft.id;
+    const targetEndpoint = endpoint;
+    const payload = { ...draft, status };
+
+    await runPending("保存失败", async () => {
+      const response = await fetch(targetEndpoint, {
+        method: payload.id ? "PUT" : "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...draft, status })
+        body: JSON.stringify(payload)
       });
-      const data = (await response.json()) as
-        | { ok: true; id: number }
-        | { ok: false; error: string };
-      if (!response.ok || !data.ok) {
-        setMessage(data.ok ? "保存失败" : data.error);
+      const data = (await response.json().catch(() => null)) as
+        | { ok: true; id: number; slug: string }
+        | { ok: false; error: string }
+        | null;
+      if (!response.ok || !data?.ok) {
+        setMessage(data && !data.ok ? data.error : "保存失败");
         return;
       }
-      setDraft((current) => ({ ...current, status }));
+      setDraft((current) => ({ ...current, id: data.id, slug: data.slug || current.slug, status }));
       setMessage(successMessage ?? (status === "published" ? "已发布" : "已保存草稿"));
-      if (!draft.id) {
+      if (wasNew) {
         router.push(`/admin/posts/${data.id}`);
       } else {
         router.refresh();
@@ -133,10 +152,14 @@ export function AdminEditor({
 
   async function deletePost() {
     if (!draft.id || !window.confirm("确定永久删除？这个操作不能撤销。")) return;
-    const response = await fetch(`${endpoint}?permanent=1`, { method: "DELETE" });
-    if (response.ok) {
+    await runPending("删除失败", async () => {
+      const response = await fetch(`${endpoint}?permanent=1`, { method: "DELETE" });
+      if (!response.ok) {
+        setMessage("删除失败");
+        return;
+      }
       router.push("/admin/posts?status=trash");
-    }
+    });
   }
 
   async function patchStatus(action: "trash" | "restore") {
@@ -146,33 +169,35 @@ export function AdminEditor({
     if (confirmMessage && !window.confirm(confirmMessage)) return;
 
     setMessage("");
-    const response = await fetch(endpoint, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action })
-    });
-    const data = (await response.json().catch(() => null)) as
-      | { ok: true; status: PostStatus }
-      | { ok: false; error: string }
-      | null;
-    if (!response.ok || !data?.ok) {
-      setMessage(data && !data.ok ? data.error : "操作失败");
-      return;
-    }
+    await runPending("操作失败", async () => {
+      const response = await fetch(endpoint, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action })
+      });
+      const data = (await response.json().catch(() => null)) as
+        | { ok: true; status: PostStatus }
+        | { ok: false; error: string }
+        | null;
+      if (!response.ok || !data?.ok) {
+        setMessage(data && !data.ok ? data.error : "操作失败");
+        return;
+      }
 
-    setDraft((current) => ({ ...current, status: data.status }));
-    setMessage(action === "trash" ? "已移到回收站" : "已恢复为草稿");
-    if (action === "trash") {
-      router.push("/admin/posts?status=trash");
-    } else {
-      router.refresh();
-    }
+      setDraft((current) => ({ ...current, status: data.status }));
+      setMessage(action === "trash" ? "已移到回收站" : "已恢复为草稿");
+      if (action === "trash") {
+        router.push("/admin/posts?status=trash");
+      } else {
+        router.refresh();
+      }
+    });
   }
 
   async function restoreRevision(revisionId: number) {
     if (!draft.id) return;
     setMessage("");
-    startTransition(async () => {
+    await runPending("恢复失败", async () => {
       const response = await fetch(`${endpoint}/revisions`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },

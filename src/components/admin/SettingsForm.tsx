@@ -316,13 +316,13 @@ export function SettingsForm({
                 </div>
                 {module.id === "now" ? (
                   <>
-                    <div className="field">
+                    <div className="field module-field-now-text">
                       <label>正在折腾</label>
-                      <input className="input" value={configText(module, "workingOn")} onChange={(event) => updateModuleConfig(module.id, "workingOn", event.target.value)} />
+                      <textarea className="textarea compact module-long-text" value={configText(module, "workingOn")} onChange={(event) => updateModuleConfig(module.id, "workingOn", event.target.value)} />
                     </div>
-                    <div className="field">
+                    <div className="field module-field-now-text">
                       <label>最近在看</label>
-                      <input className="input" value={configText(module, "reading")} onChange={(event) => updateModuleConfig(module.id, "reading", event.target.value)} />
+                      <textarea className="textarea compact module-long-text" value={configText(module, "reading")} onChange={(event) => updateModuleConfig(module.id, "reading", event.target.value)} />
                     </div>
                     <div className="field">
                       <label>已完成，逗号分隔</label>

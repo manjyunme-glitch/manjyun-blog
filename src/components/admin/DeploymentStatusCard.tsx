@@ -8,7 +8,7 @@ type CommitInfo = {
   message: string;
   committedAt: string | null;
   url: string | null;
-  source: "env" | "git" | "github" | "unknown";
+  source: "env" | "build" | "git" | "github" | "unknown";
 };
 
 type DeploymentStatus = {
@@ -63,6 +63,17 @@ function stateClass(status: DeploymentStatus | null, pending: boolean, error: st
   return "needs-update";
 }
 
+function sourceLabel(source: CommitInfo["source"]) {
+  const labels: Record<CommitInfo["source"], string> = {
+    env: "env",
+    build: "build metadata",
+    git: "local git",
+    github: "GitHub",
+    unknown: "unknown"
+  };
+  return labels[source];
+}
+
 function VersionCard({
   label,
   commit
@@ -86,7 +97,9 @@ function VersionCard({
         <strong>{data.shortSha}</strong>
       )}
       <p>{data.message}</p>
-      <small>{formatDateTime(data.committedAt)}</small>
+      <small>
+        {formatDateTime(data.committedAt)} · {sourceLabel(data.source)}
+      </small>
     </div>
   );
 }

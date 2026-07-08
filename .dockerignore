@@ -1,4 +1,5 @@
 .next/
+/.build-info.json
 node_modules/
 npm-debug.log*
 *.log
@@ -9,7 +10,6 @@ tsconfig.tsbuildinfo
 data/
 uploads/
 manjyun-theme/
-.git/
 .env
 .env.*
 stack.env

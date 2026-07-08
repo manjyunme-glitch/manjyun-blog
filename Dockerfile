@@ -10,6 +10,7 @@ ENV NEXT_TELEMETRY_DISABLED=1
 ENV GIT_COMMIT=${GIT_COMMIT}
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
+RUN node scripts/write-build-info.mjs
 RUN npm run build
 
 FROM node:24-bookworm-slim AS runner
@@ -24,6 +25,7 @@ RUN groupadd --system --gid 1001 nodejs && useradd --system --uid 1001 nextjs
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
+COPY --from=builder /app/.build-info.json ./.build-info.json
 RUN mkdir -p /app/data /app/uploads && chown -R nextjs:nodejs /app/data /app/uploads
 USER nextjs
 EXPOSE 3000
