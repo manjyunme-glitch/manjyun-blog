@@ -58,6 +58,7 @@ chown -R 1001:1001 /share/DockerData/manjyun-blog/data /share/DockerData/manjyun
 - Compose path: `docker-compose.yml`
 - Environment variables: 导入或手动填写本地 `stack.env`
 - 不要启用 `Pull latest image` / `Re-pull image`。`BLOG_IMAGE` 是 NAS 本地构建 tag，不是远程 registry 镜像。
+- 容器使用 Docker 内置 `bridge` 网络，不会创建 Compose 的 `项目_default` 自定义网络。
 - Deploy the stack
 
 4. 后续更新。

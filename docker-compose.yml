@@ -13,6 +13,7 @@ services:
         no_proxy: ${STACK_NO_PROXY:-}
     container_name: ${CONTAINER_NAME_PREFIX:-mblog}-app
     restart: unless-stopped
+    network_mode: bridge
     ports:
       - "${BLOG_BIND_IP:-0.0.0.0}:${BLOG_PORT:-4482}:3000"
     environment:
