@@ -4,6 +4,10 @@ import { useMemo, useState, useTransition } from "react";
 import type { HomeModule, NavLink, SiteSettings } from "@/types/blog";
 
 type EditableLink = Omit<NavLink, "id"> & { localId: string };
+type LinkIconState = {
+  status: "pending" | "success" | "error";
+  message: string;
+};
 
 const moduleLabels: Record<string, string> = {
   recentPosts: "Recent Posts",
@@ -70,6 +74,7 @@ export function SettingsForm({
   );
   const [mainNav, setMainNav] = useState(toEditableLinks(mainLinks));
   const [frequentNav, setFrequentNav] = useState(toEditableLinks(frequentLinks));
+  const [linkIconStates, setLinkIconStates] = useState<Record<string, LinkIconState>>({});
 
   const enabledModules = useMemo(
     () =>
@@ -132,28 +137,68 @@ export function SettingsForm({
   function removeLink(group: "main" | "frequent", localId: string) {
     const setter = group === "main" ? setMainNav : setFrequentNav;
     setter((current) => current.filter((link) => link.localId !== localId));
+    setLinkIconStates((current) => {
+      const next = { ...current };
+      delete next[localId];
+      return next;
+    });
+  }
+
+  function updateLinkIconState(localId: string, state: LinkIconState) {
+    setLinkIconStates((current) => ({ ...current, [localId]: state }));
   }
 
   async function fetchLinkIcon(group: "main" | "frequent", localId: string, url: string) {
     setMessage("");
     if (!url || url.startsWith("/")) {
-      setMessage("站内链接没有可抓取的网页图标");
+      updateLinkIconState(localId, {
+        status: "error",
+        message: "站内链接没有可抓取的网页图标"
+      });
       return;
     }
-    const response = await fetch("/api/admin/link-icon", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url })
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), 11000);
+    updateLinkIconState(localId, {
+      status: "pending",
+      message: "正在获取网页图标..."
     });
-    const data = (await response.json()) as
-      | { ok: true; iconUrl: string }
-      | { ok: false; error: string };
-    if (!response.ok || !data.ok) {
-      setMessage(data.ok ? "获取图标失败" : data.error);
-      return;
+
+    try {
+      const response = await fetch("/api/admin/link-icon", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url }),
+        signal: controller.signal
+      });
+      const data = (await response.json().catch(() => null)) as
+        | { ok: true; iconUrl: string; warning?: string }
+        | { ok: false; error: string }
+        | null;
+      if (!response.ok || !data?.ok) {
+        updateLinkIconState(localId, {
+          status: "error",
+          message: data && !data.ok ? data.error : "获取图标失败"
+        });
+        return;
+      }
+      updateLink(group, localId, { iconUrl: data.iconUrl });
+      updateLinkIconState(localId, {
+        status: data.warning ? "error" : "success",
+        message: data.warning ?? "已获取网页图标，记得保存设置"
+      });
+      setMessage(data.warning ? "图标获取超时，已使用默认 favicon 地址" : "已获取网页图标，记得保存设置");
+    } catch (error) {
+      updateLinkIconState(localId, {
+        status: "error",
+        message:
+          error instanceof DOMException && error.name === "AbortError"
+            ? "获取超时，请手动填写图标 URL 或上传图标"
+            : "获取图标失败，请稍后重试"
+      });
+    } finally {
+      window.clearTimeout(timer);
     }
-    updateLink(group, localId, { iconUrl: data.iconUrl });
-    setMessage("已获取网页图标，记得保存设置");
   }
 
   async function uploadLinkIcon(group: "main" | "frequent", localId: string, file: File) {
@@ -388,6 +433,7 @@ export function SettingsForm({
             onRemove={removeLink}
             onFetchIcon={fetchLinkIcon}
             onUploadIcon={uploadLinkIcon}
+            iconStates={linkIconStates}
           />
           <p className="admin-subtitle">
             自定义站内路径可以指向已有公开路由；页面类型已从编辑器移除，固定页面内容在这里维护。
@@ -401,6 +447,7 @@ export function SettingsForm({
             onRemove={removeLink}
             onFetchIcon={fetchLinkIcon}
             onUploadIcon={uploadLinkIcon}
+            iconStates={linkIconStates}
           />
         </section>
       </div>
@@ -451,7 +498,8 @@ function EditableLinks({
   onAdd,
   onRemove,
   onFetchIcon,
-  onUploadIcon
+  onUploadIcon,
+  iconStates
 }: {
   title: string;
   group: "main" | "frequent";
@@ -461,6 +509,7 @@ function EditableLinks({
   onRemove(group: "main" | "frequent", localId: string): void;
   onFetchIcon(group: "main" | "frequent", localId: string, url: string): Promise<void>;
   onUploadIcon(group: "main" | "frequent", localId: string, file: File): Promise<void>;
+  iconStates: Record<string, LinkIconState>;
 }) {
   return (
     <div className="link-editor">
@@ -529,9 +578,11 @@ function EditableLinks({
               <button
                 className="btn subtle"
                 type="button"
+                disabled={iconStates[link.localId]?.status === "pending"}
+                aria-busy={iconStates[link.localId]?.status === "pending"}
                 onClick={() => void onFetchIcon(group, link.localId, link.url)}
               >
-                获取图标
+                {iconStates[link.localId]?.status === "pending" ? "获取中..." : "获取图标"}
               </button>
               <label className="btn subtle file-btn">
                 上传图标
@@ -546,6 +597,11 @@ function EditableLinks({
                   }}
                 />
               </label>
+              {iconStates[link.localId] ? (
+                <small className={`link-icon-state ${iconStates[link.localId].status}`}>
+                  {iconStates[link.localId].message}
+                </small>
+              ) : null}
             </div>
           ) : null}
         </div>

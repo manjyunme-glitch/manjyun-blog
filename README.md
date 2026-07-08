@@ -47,8 +47,9 @@ mkdir -p /share/DockerData/manjyun-blog/uploads
 - `BLOG_PORT=4482`
 - `SITE_URL`：公开访问地址，生产环境建议填 HTTPS 域名
 - `SESSION_COOKIE_SECURE`：HTTPS 访问可留空；如果只用 `http://NAS_IP:4482` 访问后台，设置为 `false`
-- `GITHUB_REPOSITORY` / `GITHUB_BRANCH`：后台“检查 GitHub 更新”用于查询远端提交，默认是本仓库 `main`
-- `GIT_COMMIT`：当前 Docker 构建对应的提交 SHA。留空时 Docker 构建会尝试从构建上下文的 `.git/HEAD` 写入 `.build-info.json`；如果 Portainer 没带 `.git`，请手动填写完整 SHA，否则后台会诚实显示当前部署版本未知但仍能查询远端
+- `GITHUB_REPOSITORY` / `GITHUB_BRANCH`：后台“检查 GitHub 更新”用于查询远端提交，默认是本仓库 `main`；构建期也会用它们在 `.git` 不可用时兜底写入 `.build-info.json`
+- `GIT_COMMIT`：当前 Docker 构建对应的提交 SHA。留空时 Docker 构建会尝试从构建上下文的 `.git/HEAD` 写入 `.build-info.json`，并通过 `BUILDKIT_CONTEXT_KEEP_GIT_DIR=1` 尽量保留 Git 元数据
+- `PORTAINER_URL` / `PORTAINER_STACK_ID` / `PORTAINER_API_KEY`：可选。若 Portainer CE 部署后仍无法从镜像内识别 commit，后台会读取该 stack 的 `GitConfig.ConfigHash` 作为当前部署版本；只读 API token 即可
 - `STACK_HTTP_PROXY` / `STACK_HTTPS_PROXY`：Portainer 构建镜像需要代理时再填写
 
 3. 在 Portainer 创建 Git Stack：

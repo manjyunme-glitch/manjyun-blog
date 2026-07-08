@@ -2,6 +2,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const unknownCommit = "unknown";
+const defaultRepository = "manjyunme-glitch/manjyun-blog";
 
 function cleanCommit(value) {
   const trimmed = value?.trim();
@@ -43,6 +44,62 @@ function readGitCommit(rootDir) {
   return readPackedRef(gitDir, refName);
 }
 
+function normalizeRepository(value) {
+  const raw = value?.trim() || defaultRepository;
+  const match = raw.match(/github\.com[:/](?<owner>[^/]+)\/(?<repo>[^/.]+)(?:\.git)?$/i);
+  if (match?.groups) {
+    return `${match.groups.owner}/${match.groups.repo}`;
+  }
+  return raw.replace(/^https?:\/\/github\.com\//i, "").replace(/\.git$/i, "");
+}
+
+async function withTimeout(promise, timeoutMs, onTimeout) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      onTimeout?.();
+      reject(new Error("Request timed out"));
+    }, timeoutMs);
+  });
+
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function readGitHubCommit() {
+  const repository = normalizeRepository(
+    process.env.GITHUB_REPOSITORY ?? process.env.GITHUB_REPO
+  );
+  const branch = process.env.GITHUB_BRANCH ?? process.env.GIT_BRANCH ?? "main";
+  const controller = new AbortController();
+  const headers = {
+    Accept: "application/vnd.github+json",
+    "User-Agent": "manjyun-blog-build-info"
+  };
+  if (process.env.GITHUB_TOKEN) {
+    headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
+  }
+
+  try {
+    const response = await withTimeout(
+      fetch(
+        `https://api.github.com/repos/${repository}/commits/${encodeURIComponent(branch)}`,
+        { headers, signal: controller.signal }
+      ),
+      4500,
+      () => controller.abort()
+    );
+    if (!response.ok) return null;
+    const data = await withTimeout(response.json(), 1500);
+    return cleanCommit(data?.sha);
+  } catch {
+    return null;
+  }
+}
+
 const envCommit = cleanCommit(
   process.env.GIT_COMMIT ??
     process.env.SOURCE_COMMIT ??
@@ -52,14 +109,15 @@ const envCommit = cleanCommit(
     process.env.RAILWAY_GIT_COMMIT_SHA
 );
 const gitCommit = readGitCommit(process.cwd());
-const resolvedCommit = envCommit ?? gitCommit ?? unknownCommit;
+const githubCommit = envCommit || gitCommit ? null : await readGitHubCommit();
+const resolvedCommit = envCommit ?? gitCommit ?? githubCommit ?? unknownCommit;
 
 writeFileSync(
   join(process.cwd(), ".build-info.json"),
   `${JSON.stringify(
     {
       gitCommit: resolvedCommit,
-      source: envCommit ? "env" : gitCommit ? "git" : "unknown",
+      source: envCommit ? "env" : gitCommit ? "git" : githubCommit ? "github" : "unknown",
       builtAt: new Date().toISOString()
     },
     null,

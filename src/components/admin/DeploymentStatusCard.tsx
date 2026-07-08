@@ -8,7 +8,7 @@ type CommitInfo = {
   message: string;
   committedAt: string | null;
   url: string | null;
-  source: "env" | "build" | "git" | "github" | "unknown";
+  source: "env" | "build" | "git" | "github" | "portainer" | "unknown";
 };
 
 type DeploymentStatus = {
@@ -69,6 +69,7 @@ function sourceLabel(source: CommitInfo["source"]) {
     build: "build metadata",
     git: "local git",
     github: "GitHub",
+    portainer: "Portainer",
     unknown: "unknown"
   };
   return labels[source];

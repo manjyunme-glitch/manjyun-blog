@@ -9,6 +9,9 @@ services:
         HTTPS_PROXY: ${STACK_HTTPS_PROXY:-}
         NO_PROXY: ${STACK_NO_PROXY:-}
         GIT_COMMIT: ${GIT_COMMIT:-unknown}
+        GITHUB_REPOSITORY: ${GITHUB_REPOSITORY:-manjyunme-glitch/manjyun-blog}
+        GITHUB_BRANCH: ${GITHUB_BRANCH:-main}
+        BUILDKIT_CONTEXT_KEEP_GIT_DIR: "1"
         http_proxy: ${STACK_HTTP_PROXY:-}
         https_proxy: ${STACK_HTTPS_PROXY:-}
         no_proxy: ${STACK_NO_PROXY:-}
@@ -32,6 +35,9 @@ services:
       GIT_COMMIT: ${GIT_COMMIT:-unknown}
       GITHUB_REPOSITORY: ${GITHUB_REPOSITORY:-manjyunme-glitch/manjyun-blog}
       GITHUB_BRANCH: ${GITHUB_BRANCH:-main}
+      PORTAINER_URL: ${PORTAINER_URL:-}
+      PORTAINER_STACK_ID: ${PORTAINER_STACK_ID:-}
+      PORTAINER_API_KEY: ${PORTAINER_API_KEY:-}
     volumes:
       - ${STACK_BASE_DIR}/data:/app/data
       - ${STACK_BASE_DIR}/uploads:/app/uploads

@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { NextResponse } from "next/server";
 import { requireAdminForApi } from "@/lib/auth/session";
@@ -12,7 +12,7 @@ const execFileAsync = promisify(execFile);
 const defaultRepository = "manjyunme-glitch/manjyun-blog";
 const unknownCommit = "unknown";
 
-type CommitSource = "env" | "build" | "git" | "github" | "unknown";
+type CommitSource = "env" | "build" | "git" | "github" | "portainer" | "unknown";
 
 type CommitInfo = {
   sha: string | null;
@@ -40,6 +40,20 @@ type BuildInfo = {
   source?: string;
   builtAt?: string;
 };
+
+type PortainerStackResponse = {
+  GitConfig?: {
+    ConfigHash?: string;
+    configHash?: string;
+  };
+};
+
+class TimeoutError extends Error {
+  constructor(message = "Request timed out") {
+    super(message);
+    this.name = "TimeoutError";
+  }
+}
 
 function cleanCommit(value: string | undefined) {
   const trimmed = value?.trim();
@@ -75,6 +89,26 @@ async function git(args: string[]) {
     windowsHide: true
   });
   return stdout.trim();
+}
+
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  onTimeout?: () => void
+) {
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      onTimeout?.();
+      reject(new TimeoutError());
+    }, timeoutMs);
+  });
+
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 async function currentFromGit(): Promise<CommitInfo | null> {
@@ -124,6 +158,7 @@ async function currentFromEnv(repository: string): Promise<CommitInfo | null> {
     process.env.GIT_COMMIT ??
       process.env.SOURCE_COMMIT ??
       process.env.COMMIT_SHA ??
+      process.env.PORTAINER_GIT_COMMIT ??
       process.env.VERCEL_GIT_COMMIT_SHA ??
       process.env.CF_PAGES_COMMIT_SHA ??
       process.env.RAILWAY_GIT_COMMIT_SHA
@@ -133,16 +168,55 @@ async function currentFromEnv(repository: string): Promise<CommitInfo | null> {
   return commitInfoFromSha(repository, sha, "env");
 }
 
-async function currentFromBuildInfo(repository: string): Promise<CommitInfo | null> {
+async function currentFromPortainer(repository: string): Promise<CommitInfo | null> {
+  const baseUrl = process.env.PORTAINER_URL?.trim();
+  const stackId = process.env.PORTAINER_STACK_ID?.trim();
+  const apiKey = process.env.PORTAINER_API_KEY?.trim();
+  if (!baseUrl || !stackId || !apiKey) return null;
+
+  const controller = new AbortController();
   try {
-    const raw = await readFile(join(process.cwd(), ".build-info.json"), "utf8");
-    const data = JSON.parse(raw) as BuildInfo;
-    const sha = cleanCommit(data.gitCommit);
-    if (!sha) return null;
-    return commitInfoFromSha(repository, sha, "build");
+    const response = await withTimeout(
+      fetch(`${baseUrl.replace(/\/+$/, "")}/api/stacks/${encodeURIComponent(stackId)}`, {
+        cache: "no-store",
+        headers: {
+          Accept: "application/json",
+          "X-API-Key": apiKey,
+          "User-Agent": "manjyun-blog-deployment-status"
+        },
+        signal: controller.signal
+      }),
+      3500,
+      () => controller.abort()
+    );
+    if (!response.ok) return null;
+    const data = (await response.json()) as PortainerStackResponse;
+    const sha = cleanCommit(data.GitConfig?.ConfigHash ?? data.GitConfig?.configHash);
+    return sha ? commitInfoFromSha(repository, sha, "portainer") : null;
   } catch {
     return null;
   }
+}
+
+async function currentFromBuildInfo(repository: string): Promise<CommitInfo | null> {
+  const candidates = [
+    process.env.BUILD_INFO_PATH ? resolve(process.env.BUILD_INFO_PATH) : "",
+    join(process.cwd(), ".build-info.json"),
+    join(process.cwd(), ".next", "standalone", ".build-info.json")
+  ].filter(Boolean);
+
+  for (const filePath of candidates) {
+    try {
+      const raw = await readFile(filePath, "utf8");
+      const data = JSON.parse(raw) as BuildInfo;
+      const sha = cleanCommit(data.gitCommit);
+      if (!sha) continue;
+      return commitInfoFromSha(repository, sha, "build");
+    } catch {
+      continue;
+    }
+  }
+  return null;
 }
 
 async function githubCommit(repository: string, ref: string) {
@@ -154,9 +228,14 @@ async function githubCommit(repository: string, ref: string) {
     headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
   }
 
-  const response = await fetch(
-    `https://api.github.com/repos/${repository}/commits/${encodeURIComponent(ref)}`,
-    { cache: "no-store", headers }
+  const controller = new AbortController();
+  const response = await withTimeout(
+    fetch(
+      `https://api.github.com/repos/${repository}/commits/${encodeURIComponent(ref)}`,
+      { cache: "no-store", headers, signal: controller.signal }
+    ),
+    5000,
+    () => controller.abort()
   );
   if (!response.ok) {
     throw new Error(`GitHub returned ${response.status}`);
@@ -194,11 +273,16 @@ export async function GET() {
   const branch = process.env.GITHUB_BRANCH ?? process.env.GIT_BRANCH ?? "main";
   const checkedAt = new Date().toISOString();
 
-  const current =
+  let current =
     (await currentFromEnv(repository)) ??
-    (await currentFromBuildInfo(repository)) ??
-    (await currentFromGit()) ??
-    unknownCurrent();
+    (await currentFromPortainer(repository));
+  if (!current) {
+    current =
+      process.env.NODE_ENV === "development"
+        ? (await currentFromGit()) ?? (await currentFromBuildInfo(repository))
+        : (await currentFromBuildInfo(repository)) ?? (await currentFromGit());
+  }
+  current ??= unknownCurrent();
 
   let remote: CommitInfo | null = null;
   let error: string | null = null;

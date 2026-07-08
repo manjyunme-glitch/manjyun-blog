@@ -21,6 +21,8 @@ type Draft = {
   seoDescription: string;
 };
 
+const emptyRevisions: PostRevision[] = [];
+
 const starterMarkdown = `这里写 Markdown 正文。标题请填写在右侧“标题”字段中，正文从这里开始。
 
 ## 小标题
@@ -48,7 +50,7 @@ function draftFromPost(post: PostWithTags | null): Draft {
 
 export function AdminEditor({
   post,
-  revisions = []
+  revisions = emptyRevisions
 }: {
   post: PostWithTags | null;
   revisions?: PostRevision[];
@@ -143,7 +145,7 @@ export function AdminEditor({
       setDraft((current) => ({ ...current, id: data.id, slug: data.slug || current.slug, status }));
       setMessage(successMessage ?? (status === "published" ? "已发布" : "已保存草稿"));
       if (wasNew) {
-        router.push(`/admin/posts/${data.id}`);
+        window.location.assign(`/admin/posts/${data.id}`);
       } else {
         router.refresh();
       }
@@ -290,10 +292,10 @@ export function AdminEditor({
               </>
             ) : draft.status === "published" ? (
               <>
-                <button className="btn" type="button" disabled={pending} onClick={() => save("published", "已保存更改")}>
+                <button className="btn" type="button" disabled={pending} onClick={() => void save("published", "已保存更改")}>
                   保存更改
                 </button>
-                <button className="btn primary" type="button" disabled={pending} onClick={() => save("draft", "已取消发布")}>
+                <button className="btn primary" type="button" disabled={pending} onClick={() => void save("draft", "已取消发布")}>
                   取消发布
                 </button>
                 <button className="btn danger" type="button" disabled={pending || !draft.id} onClick={() => void patchStatus("trash")}>
@@ -302,10 +304,10 @@ export function AdminEditor({
               </>
             ) : (
               <>
-                <button className="btn" type="button" disabled={pending} onClick={() => save("draft")}>
+                <button className="btn" type="button" disabled={pending} onClick={() => void save("draft")}>
                   保存草稿
                 </button>
-                <button className="btn primary" type="button" disabled={pending} onClick={() => save("published")}>
+                <button className="btn primary" type="button" disabled={pending} onClick={() => void save("published")}>
                   发布
                 </button>
                 {draft.id ? (

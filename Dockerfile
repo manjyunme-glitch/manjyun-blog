@@ -6,8 +6,12 @@ RUN npm ci --no-audit --no-fund
 FROM node:24-bookworm-slim AS builder
 WORKDIR /app
 ARG GIT_COMMIT=unknown
+ARG GITHUB_REPOSITORY=manjyunme-glitch/manjyun-blog
+ARG GITHUB_BRANCH=main
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV GIT_COMMIT=${GIT_COMMIT}
+ENV GITHUB_REPOSITORY=${GITHUB_REPOSITORY}
+ENV GITHUB_BRANCH=${GITHUB_BRANCH}
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN node scripts/write-build-info.mjs
