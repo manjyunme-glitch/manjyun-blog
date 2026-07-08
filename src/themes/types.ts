@@ -32,6 +32,8 @@ export type ThemeArchiveProps = {
   title: string;
   description: string;
   posts: PostRecord[];
+  backHref?: string;
+  backLabel?: string;
 };
 
 export type ThemePageProps = {

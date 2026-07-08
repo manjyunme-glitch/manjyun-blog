@@ -28,6 +28,8 @@ export default async function TagPage({
       title={`# ${tag.name}`}
       description="按标签筛选的公开内容。"
       posts={listPosts({ tagSlug: tag.slug, status: "published" })}
+      backHref="/posts"
+      backLabel="/posts"
     />
   );
 }

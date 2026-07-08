@@ -254,6 +254,40 @@ export function makeUniqueSlug(type: PostType, desired: string, excludeId?: numb
   }
 }
 
+function autoSlugPrefix(type: PostType) {
+  if (type === "project") return "projects";
+  if (type === "page") return "pages";
+  return "posts";
+}
+
+function makeSequentialSlug(type: PostType, excludeId?: number) {
+  const prefix = autoSlugPrefix(type);
+  const rows = all<{ slug: string }>(
+    `SELECT slug FROM posts WHERE type = ? AND slug LIKE ? ${
+      excludeId ? "AND id != ?" : ""
+    }`,
+    excludeId ? [type, `${prefix}-%`, excludeId] : [type, `${prefix}-%`]
+  );
+  const pattern = new RegExp(`^${prefix}-(\\d+)$`);
+  const max = rows.reduce((highest, row) => {
+    const value = Number(row.slug.match(pattern)?.[1] ?? 0);
+    return Number.isFinite(value) ? Math.max(highest, value) : highest;
+  }, 0);
+  let index = max + 1;
+
+  while (true) {
+    const candidate = `${prefix}-${String(index).padStart(3, "0")}`;
+    const found = get<IdRow>(
+      `SELECT id FROM posts WHERE type = ? AND slug = ? ${
+        excludeId ? "AND id != ?" : ""
+      }`,
+      excludeId ? [type, candidate, excludeId] : [type, candidate]
+    );
+    if (!found) return candidate;
+    index += 1;
+  }
+}
+
 function createPostRevision(post: PostRecord, reason = "save") {
   const now = new Date().toISOString();
   run(
@@ -343,11 +377,10 @@ export function savePost(input: SavePostInput) {
   const seoTitle = input.seoTitle?.trim() || null;
   const seoDescription = input.seoDescription?.trim() || null;
   const tags = input.tags ?? [];
-  const slug = makeUniqueSlug(
-    input.type,
-    input.slug?.trim() || title,
-    existing?.id
-  );
+  const desiredSlug = input.slug?.trim() ?? "";
+  const slug = desiredSlug
+    ? makeUniqueSlug(input.type, desiredSlug, existing?.id)
+    : makeSequentialSlug(input.type, existing?.id);
   const publishedAt =
     existing?.publishedAt ??
     input.publishedAt ??
@@ -491,7 +524,7 @@ export function listPosts(options: {
     sql += " LIMIT ?";
     params.push(options.limit);
   }
-  return all<PostRecord>(sql, params).map(normalizePost);
+  return all<PostRecord>(sql, params).map((post) => withTags(normalizePost(post)));
 }
 
 export function getPostById(id: number) {

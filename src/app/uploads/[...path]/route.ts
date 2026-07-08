@@ -6,11 +6,13 @@ import { assertInside, getUploadsDir } from "@/lib/paths";
 export const dynamic = "force-dynamic";
 
 const mimeMap: Record<string, string> = {
+  ".ico": "image/x-icon",
   ".jpg": "image/jpeg",
   ".jpeg": "image/jpeg",
   ".png": "image/png",
   ".gif": "image/gif",
   ".webp": "image/webp",
+  ".avif": "image/avif",
   ".svg": "image/svg+xml",
   ".mp3": "audio/mpeg",
   ".wav": "audio/wav",

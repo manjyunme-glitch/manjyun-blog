@@ -1,5 +1,12 @@
+import crypto from "node:crypto";
+import fs from "node:fs/promises";
+import http from "node:http";
+import https from "node:https";
+import path from "node:path";
+import tls from "node:tls";
 import { NextResponse } from "next/server";
 import { requireAdminForApi } from "@/lib/auth/session";
+import { ensureUploadsDir, getUploadsDir } from "@/lib/paths";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -10,6 +17,18 @@ class TimeoutError extends Error {
     this.name = "TimeoutError";
   }
 }
+
+const iconMaxBytes = 1024 * 1024;
+const localIconDir = "link-icons";
+const iconExtensions = [".ico", ".png", ".svg", ".webp", ".gif", ".jpg", ".jpeg", ".avif"];
+
+type FetchResult = {
+  ok: boolean;
+  status: number;
+  url: string;
+  headers: Map<string, string>;
+  body: Buffer;
+};
 
 function readAttribute(source: string, name: string) {
   const pattern = new RegExp(`${name}\\s*=\\s*["']([^"']+)["']`, "i");
@@ -55,24 +74,341 @@ function fallbackIconUrl(target: URL) {
   return new URL("/favicon.ico", target).toString();
 }
 
-async function withTimeout<T>(
-  promise: Promise<T>,
-  timeoutMs: number,
-  onTimeout?: () => void
+function shouldBypassProxy(hostname: string) {
+  const rules = (process.env.NO_PROXY ?? process.env.no_proxy ?? "")
+    .split(",")
+    .map((rule) => rule.trim().toLowerCase())
+    .filter(Boolean);
+  const host = hostname.toLowerCase();
+  return rules.some((rule) => {
+    if (rule === "*") return true;
+    if (rule.startsWith(".")) return host.endsWith(rule);
+    return host === rule || host.endsWith(`.${rule}`);
+  });
+}
+
+function proxyForUrl(target: URL) {
+  if (shouldBypassProxy(target.hostname)) return null;
+  const raw =
+    target.protocol === "https:"
+      ? process.env.HTTPS_PROXY ?? process.env.https_proxy ?? process.env.HTTP_PROXY ?? process.env.http_proxy
+      : process.env.HTTP_PROXY ?? process.env.http_proxy;
+  const fallback = process.env.ALL_PROXY ?? process.env.all_proxy;
+  const proxy = raw || fallback;
+  if (!proxy) return null;
+  try {
+    const url = new URL(proxy);
+    return url.protocol === "http:" || url.protocol === "https:" ? url : null;
+  } catch {
+    return null;
+  }
+}
+
+function headersFromResponse(headers: http.IncomingHttpHeaders) {
+  const map = new Map<string, string>();
+  for (const [key, value] of Object.entries(headers)) {
+    if (Array.isArray(value)) {
+      map.set(key.toLowerCase(), value.join(", "));
+    } else if (value !== undefined) {
+      map.set(key.toLowerCase(), String(value));
+    }
+  }
+  return map;
+}
+
+function proxyAuthHeader(proxy: URL) {
+  if (!proxy.username) return null;
+  return `Basic ${Buffer.from(`${decodeURIComponent(proxy.username)}:${decodeURIComponent(proxy.password)}`).toString("base64")}`;
+}
+
+function collectResponse(
+  response: http.IncomingMessage,
+  finalUrl: string,
+  maxBytes: number
 ) {
-  let timer: NodeJS.Timeout | undefined;
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => {
-      onTimeout?.();
-      reject(new TimeoutError());
-    }, timeoutMs);
+  return new Promise<FetchResult>((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let total = 0;
+    response.on("data", (chunk: Buffer) => {
+      total += chunk.length;
+      if (total > maxBytes) {
+        response.destroy(new Error("Response is too large."));
+        return;
+      }
+      chunks.push(chunk);
+    });
+    response.on("end", () => {
+      resolve({
+        ok: (response.statusCode ?? 0) >= 200 && (response.statusCode ?? 0) < 300,
+        status: response.statusCode ?? 0,
+        url: finalUrl,
+        headers: headersFromResponse(response.headers),
+        body: Buffer.concat(chunks)
+      });
+    });
+    response.on("error", reject);
+  });
+}
+
+function requestDirect(target: URL, headers: Record<string, string>, timeoutMs: number, maxBytes: number) {
+  return new Promise<FetchResult>((resolve, reject) => {
+    const client = target.protocol === "https:" ? https : http;
+    const request = client.request(
+      {
+        protocol: target.protocol,
+        hostname: target.hostname,
+        port: target.port || (target.protocol === "https:" ? 443 : 80),
+        path: `${target.pathname}${target.search}`,
+        method: "GET",
+        headers: {
+          ...headers,
+          Host: target.host,
+          Connection: "close"
+        },
+        timeout: timeoutMs
+      },
+      (response) => {
+        collectResponse(response, response.headers.location ? new URL(response.headers.location, target).toString() : target.toString(), maxBytes)
+          .then(resolve)
+          .catch(reject);
+      }
+    );
+    request.on("timeout", () => request.destroy(new TimeoutError()));
+    request.on("error", reject);
+    request.end();
+  });
+}
+
+function requestViaProxy(target: URL, proxy: URL, headers: Record<string, string>, timeoutMs: number, maxBytes: number) {
+  if (target.protocol === "http:") {
+    return requestHttpViaProxy(target, proxy, headers, timeoutMs, maxBytes);
+  }
+  return requestHttpsViaProxy(target, proxy, headers, timeoutMs, maxBytes);
+}
+
+function requestHttpViaProxy(target: URL, proxy: URL, headers: Record<string, string>, timeoutMs: number, maxBytes: number) {
+  return new Promise<FetchResult>((resolve, reject) => {
+    const auth = proxyAuthHeader(proxy);
+    const proxyClient = proxy.protocol === "https:" ? https : http;
+    const request = proxyClient.request(
+      {
+        protocol: proxy.protocol,
+        hostname: proxy.hostname,
+        port: proxy.port || (proxy.protocol === "https:" ? 443 : 80),
+        path: target.toString(),
+        method: "GET",
+        headers: {
+          ...headers,
+          Host: target.host,
+          ...(auth ? { "Proxy-Authorization": auth } : {}),
+          Connection: "close"
+        },
+        timeout: timeoutMs
+      },
+      (response) => {
+        collectResponse(response, response.headers.location ? new URL(response.headers.location, target).toString() : target.toString(), maxBytes)
+          .then(resolve)
+          .catch(reject);
+      }
+    );
+    request.on("timeout", () => request.destroy(new TimeoutError()));
+    request.on("error", reject);
+    request.end();
+  });
+}
+
+function requestHttpsViaProxy(target: URL, proxy: URL, headers: Record<string, string>, timeoutMs: number, maxBytes: number) {
+  return new Promise<FetchResult>((resolve, reject) => {
+    const auth = proxyAuthHeader(proxy);
+    const proxyClient = proxy.protocol === "https:" ? https : http;
+    const connectRequest = proxyClient.request({
+      hostname: proxy.hostname,
+      port: proxy.port || 80,
+      method: "CONNECT",
+      path: `${target.hostname}:${target.port || 443}`,
+      headers: auth ? { "Proxy-Authorization": auth } : undefined,
+      timeout: timeoutMs
+    });
+
+    connectRequest.on("connect", (response, socket) => {
+      if (response.statusCode !== 200) {
+        socket.destroy();
+        reject(new Error(`Proxy CONNECT returned ${response.statusCode}`));
+        return;
+      }
+
+      const secureSocket = tls.connect({
+        socket,
+        servername: target.hostname
+      });
+      secureSocket.on("error", reject);
+      secureSocket.on("secureConnect", () => {
+        const request = https.request(
+          {
+            protocol: "https:",
+            hostname: target.hostname,
+            port: target.port || 443,
+            path: `${target.pathname}${target.search}`,
+            method: "GET",
+            headers: {
+              ...headers,
+              Host: target.host,
+              Connection: "close"
+            },
+            createConnection: () => secureSocket,
+            agent: false,
+            timeout: timeoutMs
+          },
+          (iconResponse) => {
+            collectResponse(iconResponse, iconResponse.headers.location ? new URL(iconResponse.headers.location, target).toString() : target.toString(), maxBytes)
+              .then(resolve)
+              .catch(reject);
+          }
+        );
+        request.on("timeout", () => request.destroy(new TimeoutError()));
+        request.on("error", reject);
+        request.end();
+      });
+    });
+    connectRequest.on("timeout", () => connectRequest.destroy(new TimeoutError()));
+    connectRequest.on("error", reject);
+    connectRequest.end();
+  });
+}
+
+async function fetchUrl(
+  input: string,
+  {
+    accept,
+    timeoutMs,
+    maxBytes,
+    redirects = 4
+  }: {
+    accept: string;
+    timeoutMs: number;
+    maxBytes: number;
+    redirects?: number;
+  }
+): Promise<FetchResult> {
+  const target = new URL(input);
+  const headers = {
+    Accept: accept,
+    "User-Agent": "Mozilla/5.0 ManJyunBlog/0.1 favicon fetcher"
+  };
+  const proxy = proxyForUrl(target);
+  const result = proxy
+    ? await requestViaProxy(target, proxy, headers, timeoutMs, maxBytes)
+    : await requestDirect(target, headers, timeoutMs, maxBytes);
+
+  if ([301, 302, 303, 307, 308].includes(result.status)) {
+    const location = result.headers.get("location");
+    if (location && redirects > 0) {
+      return fetchUrl(new URL(location, target).toString(), {
+        accept,
+        timeoutMs,
+        maxBytes,
+        redirects: redirects - 1
+      });
+    }
+  }
+
+  return result;
+}
+
+function iconExtFromMime(mime: string) {
+  const normalized = mime.split(";")[0].trim().toLowerCase();
+  const extByMime: Record<string, string> = {
+    "image/x-icon": ".ico",
+    "image/vnd.microsoft.icon": ".ico",
+    "image/png": ".png",
+    "image/svg+xml": ".svg",
+    "image/webp": ".webp",
+    "image/gif": ".gif",
+    "image/jpeg": ".jpg",
+    "image/avif": ".avif"
+  };
+  return extByMime[normalized] ?? null;
+}
+
+function iconExtFromUrl(input: string) {
+  try {
+    const ext = path.extname(new URL(input).pathname).toLowerCase();
+    return iconExtensions.includes(ext) ? ext : null;
+  } catch {
+    return null;
+  }
+}
+
+function iconCacheHash(iconUrl: string) {
+  return crypto.createHash("sha256").update(iconUrl).digest("hex").slice(0, 28);
+}
+
+function localIconPath(iconUrl: string, ext: string) {
+  const filename = `${iconCacheHash(iconUrl)}${ext}`;
+  return {
+    fullPath: path.join(getUploadsDir(), localIconDir, filename),
+    publicUrl: `/uploads/${localIconDir}/${filename}`
+  };
+}
+
+async function readCachedIcon(iconUrl: string) {
+  for (const ext of iconExtensions) {
+    const candidate = localIconPath(iconUrl, ext);
+    try {
+      await fs.access(candidate.fullPath);
+      return candidate.publicUrl;
+    } catch {
+      // Try the next known image extension.
+    }
+  }
+  return "";
+}
+
+function isImageResponse(response: FetchResult, iconUrl: string) {
+  const mime = response.headers.get("content-type") ?? "";
+  if (mime.toLowerCase().startsWith("image/")) return true;
+  return Boolean(iconExtFromUrl(response.url || iconUrl));
+}
+
+async function cacheRemoteIcon(iconUrl: string, timeoutMs = 5200) {
+  const cached = await readCachedIcon(iconUrl);
+  if (cached) return cached;
+
+  const response = await fetchUrl(iconUrl, {
+    accept: "image/avif,image/webp,image/svg+xml,image/png,image/*,*/*;q=0.8",
+    timeoutMs,
+    maxBytes: iconMaxBytes
   });
 
-  try {
-    return await Promise.race([promise, timeout]);
-  } finally {
-    if (timer) clearTimeout(timer);
+  if (!response.ok || !isImageResponse(response, iconUrl)) {
+    throw new Error("Icon response is not an image.");
   }
+
+  const contentLength = Number(response.headers.get("content-length") ?? 0);
+  if (contentLength > iconMaxBytes) {
+    throw new Error("Icon is too large.");
+  }
+
+  const buffer = response.body;
+  if (buffer.length > iconMaxBytes) {
+    throw new Error("Icon is too large.");
+  }
+
+  const ext =
+    iconExtFromMime(response.headers.get("content-type") ?? "") ??
+    iconExtFromUrl(response.url || iconUrl) ??
+    ".ico";
+  const target = localIconPath(iconUrl, ext);
+  ensureUploadsDir();
+  await fs.mkdir(path.dirname(target.fullPath), { recursive: true });
+  try {
+    await fs.writeFile(target.fullPath, buffer, { flag: "wx" });
+  } catch (error) {
+    if (!(error && typeof error === "object" && "code" in error && error.code === "EEXIST")) {
+      throw error;
+    }
+  }
+  return target.publicUrl;
 }
 
 export async function POST(request: Request) {
@@ -89,26 +425,22 @@ export async function POST(request: Request) {
   }
 
   try {
-    const controller = new AbortController();
-    const response = await withTimeout(
-      fetch(target, {
-        redirect: "follow",
-        signal: controller.signal,
-        headers: {
-          Accept: "text/html,application/xhtml+xml",
-          "User-Agent": "Mozilla/5.0 ManJyunBlog/0.1 favicon fetcher"
-        }
-      }),
-      5500,
-      () => controller.abort()
-    );
-    const finalUrl = new URL(response.url || target.toString());
-    const html = await withTimeout(response.text(), 2200, () => {
-      void response.body?.cancel();
+    const directIcon = await cacheRemoteIcon(fallbackIconUrl(target)).catch(() => "");
+    if (directIcon) {
+      return NextResponse.json({ ok: true, iconUrl: directIcon });
+    }
+
+    const response = await fetchUrl(target.toString(), {
+      accept: "text/html,application/xhtml+xml",
+      timeoutMs: 5500,
+      maxBytes: 2 * 1024 * 1024
     });
+    const finalUrl = new URL(response.url || target.toString());
+    const html = response.body.toString("utf8");
     const iconUrl = findIcon(html, finalUrl);
     if (iconUrl) {
-      return NextResponse.json({ ok: true, iconUrl });
+      const localIcon = await cacheRemoteIcon(iconUrl).catch(() => "");
+      return NextResponse.json({ ok: true, iconUrl: localIcon || iconUrl });
     }
 
     return NextResponse.json({

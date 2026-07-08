@@ -187,7 +187,7 @@ export function SettingsForm({
         status: data.warning ? "error" : "success",
         message: data.warning ?? "已获取网页图标，记得保存设置"
       });
-      setMessage(data.warning ? "图标获取超时，已使用默认 favicon 地址" : "已获取网页图标，记得保存设置");
+      setMessage(data.warning ?? "已获取网页图标，记得保存设置");
     } catch (error) {
       updateLinkIconState(localId, {
         status: "error",

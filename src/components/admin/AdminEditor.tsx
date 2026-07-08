@@ -31,7 +31,9 @@ const revisionFilters: Array<{ id: RevisionFilter; label: string }> = [
   { id: "draft", label: "草稿" }
 ];
 
-const starterMarkdown = `这里写 Markdown 正文。标题请填写在右侧“标题”字段中，正文从这里开始。
+const starterMarkdown = `# 这里写正文标题
+
+标题字段用于后台列表、SEO 和管理识别；公开正文标题请在 Markdown 里写。
 
 ## 小标题
 
@@ -488,7 +490,7 @@ export function AdminEditor({
           </div>
           <div className="field">
             <label>Slug</label>
-            <input className="input" value={draft.slug} disabled={draft.status === "trashed"} onChange={(event) => update("slug", event.target.value)} placeholder="自动生成" />
+            <input className="input" value={draft.slug} disabled={draft.status === "trashed"} onChange={(event) => update("slug", event.target.value)} placeholder={draft.type === "project" ? "留空自动生成 projects-001" : "留空自动生成 posts-001"} />
           </div>
           <div className="field">
             <label>类型</label>
@@ -602,6 +604,7 @@ function WritingHelp() {
         <HelpItem title="列表" code={"- 无序列表\n1. 有序列表\n- [ ] 待办\n- [x] 完成"} />
         <HelpItem title="引用与强调" code={"> 引用内容\n**加粗**\n*斜体*"} />
         <HelpItem title="代码" code={"`inline code`\n\n```ts\nconst port = 4482;\n```"} />
+        <HelpItem title="兼容代码块" code={'[code:json]\n{ "blog": "www.manjyun.top" }\n[/code]'} />
         <HelpItem title="链接与图片" code={"[链接文字](https://example.com)\n![图片说明](/uploads/image.png)"} />
         <HelpItem title="音频卡片" code={'[audio:曲名](/uploads/song.mp3 "可选说明")'} />
         <HelpItem title="书签卡片" code={'[bookmark:标题](https://example.com "可选摘要")'} />

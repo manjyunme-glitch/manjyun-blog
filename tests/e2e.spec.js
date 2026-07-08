@@ -40,5 +40,5 @@ test("setup admin and publish a post", async ({ page }) => {
   expect(result.ok, result.body).toBeTruthy();
 
   await page.goto(`${baseUrl}/posts/e2e-test-post`);
-  await expect(page.locator(".article-title", { hasText: "E2E Test Post" })).toBeVisible();
+  await expect(page.locator(".gh-content h1", { hasText: "E2E Test Post" })).toBeVisible();
 });

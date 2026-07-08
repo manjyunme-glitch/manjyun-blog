@@ -11,11 +11,43 @@ test("post publishing keeps first published time and revisions restore linearly"
   process.env.DATABASE_PATH = path.join(root, "manjyun.sqlite");
 
   const {
+    listPosts,
     listPostRevisions,
     restorePostRevision,
     savePost,
     setPostStatus
   } = await import("@/lib/db/queries");
+
+  const firstAutoSlug = savePost({
+    type: "post",
+    title: "First Auto Slug",
+    markdown: "auto body",
+    status: "draft",
+    tags: ["Alpha", "Beta"]
+  });
+  assert.equal(firstAutoSlug.slug, "posts-001");
+  assert.deepEqual(
+    listPosts({ type: "post" }).find((post) => post.id === firstAutoSlug.id)?.tags?.map((tag) => tag.name),
+    ["Alpha", "Beta"]
+  );
+
+  const secondAutoSlug = savePost({
+    type: "post",
+    title: "Second Auto Slug",
+    markdown: "auto body",
+    status: "published",
+    tags: []
+  });
+  assert.equal(secondAutoSlug.slug, "posts-002");
+
+  const projectAutoSlug = savePost({
+    type: "project",
+    title: "Project Auto Slug",
+    markdown: "auto body",
+    status: "draft",
+    tags: []
+  });
+  assert.equal(projectAutoSlug.slug, "projects-001");
 
   const published = savePost({
     type: "post",

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { formatDateTime as formatBeijingDateTime } from "@/lib/content/format";
 
 type CommitInfo = {
@@ -37,6 +37,21 @@ const initialCurrent: CommitInfo = {
   url: null,
   source: "unknown"
 };
+
+const statusCacheKey = "manjyun:deployment-status:last-check";
+const autoCheckKey = "manjyun:deployment-status:auto-checked";
+
+function readCachedDeploymentStatus() {
+  if (typeof window === "undefined") return null;
+  try {
+    const cached = window.sessionStorage.getItem(statusCacheKey);
+    if (!cached) return null;
+    const parsed = JSON.parse(cached) as DeploymentStatus;
+    return parsed?.ok ? parsed : null;
+  } catch {
+    return null;
+  }
+}
 
 function formatCommitDateTime(input: string | null) {
   return input ? formatBeijingDateTime(input) : "时间未知";
@@ -100,11 +115,11 @@ function VersionCard({
 }
 
 export function DeploymentStatusCard() {
-  const [status, setStatus] = useState<DeploymentStatus | null>(null);
+  const [status, setStatus] = useState<DeploymentStatus | null>(() => readCachedDeploymentStatus());
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
 
-  async function checkStatus() {
+  const checkStatus = useCallback(async () => {
     setPending(true);
     setError("");
     try {
@@ -120,12 +135,27 @@ export function DeploymentStatusCard() {
         return;
       }
       setStatus(data);
+      try {
+        window.sessionStorage.setItem(statusCacheKey, JSON.stringify(data));
+      } catch {
+        // Session storage is only an optimization for returning to the overview.
+      }
     } catch (issue) {
       setError(issue instanceof Error ? issue.message : "检查失败");
     } finally {
       setPending(false);
     }
-  }
+  }, []);
+
+  useEffect(() => {
+    try {
+      if (window.sessionStorage.getItem(autoCheckKey) === "1") return;
+      window.sessionStorage.setItem(autoCheckKey, "1");
+    } catch {
+      return;
+    }
+    void checkStatus();
+  }, [checkStatus]);
 
   const current = status?.current ?? initialCurrent;
   const remote = status?.remote ?? null;

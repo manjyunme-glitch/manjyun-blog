@@ -217,6 +217,7 @@ export function AdminContentTable({
               <th>标题</th>
               <th>状态</th>
               <th>类型</th>
+              <th>标签</th>
               <th>更新</th>
               <th>路径</th>
               <th>操作</th>
@@ -245,6 +246,19 @@ export function AdminContentTable({
                 </td>
                 <td>
                   <span className="type-pill">{typeLabels[post.type]}</span>
+                </td>
+                <td>
+                  {post.tags?.length ? (
+                    <div className="content-tags">
+                      {post.tags.map((tag) => (
+                        <Link key={tag.id} href={`/tag/${tag.slug}`} target="_blank" rel="noreferrer">
+                          {tag.name}
+                        </Link>
+                      ))}
+                    </div>
+                  ) : (
+                    <span className="muted-cell">-</span>
+                  )}
                 </td>
                 <td>{formatDate(post.updatedAt)}</td>
                 <td>

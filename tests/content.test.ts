@@ -29,6 +29,18 @@ test("markdown renderer supports headings and custom cards", () => {
   assert.match(rendered.html, /mj-bookmark-card/);
 });
 
+test("markdown renderer supports compatible code blocks and task lists", () => {
+  const rendered = renderMarkdown(`[code] { "blog": "[www.manjyun.top](http://www.manjyun.top/)" } [/code]
+
+- [x] done
+`);
+
+  assert.match(rendered.html, /mj-code-block/);
+  assert.match(rendered.html, /language-json/);
+  assert.match(rendered.html, /www\.manjyun\.top/);
+  assert.match(rendered.html, /type="checkbox"/);
+});
+
 test("theme registry returns the default theme", () => {
   assert.equal(getThemes().length, 1);
   assert.equal(getTheme("missing").meta.id, "manjyun-console");

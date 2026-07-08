@@ -151,22 +151,34 @@ function PostList({
 
   return (
     <div className={`posts-list ${detailed ? "posts-list-detailed" : ""}`}>
-      {posts.map((post) => (
-        <Link
-          key={post.id}
-          className="post-row"
-          href={post.type === "project" ? `/projects/${post.slug}` : `/posts/${post.slug}`}
-        >
-          <span className="post-date">{formatDate(post.publishedAt ?? post.createdAt)}</span>
-          <span className="post-body">
-            <span className="post-title">{post.title}</span>
-            {detailed && post.excerpt ? (
-              <span className="post-excerpt">{post.excerpt}</span>
-            ) : null}
-          </span>
-          <span className="post-kind">{post.type}</span>
-        </Link>
-      ))}
+      {posts.map((post) => {
+        const href = post.type === "project" ? `/projects/${post.slug}` : `/posts/${post.slug}`;
+        const tags = post.tags ?? [];
+
+        return (
+          <article key={post.id} className="post-row">
+            <span className="post-date">{formatDate(post.publishedAt ?? post.createdAt)}</span>
+            <Link className="post-body" href={href}>
+              <span className="post-title">{post.title}</span>
+              {detailed && post.excerpt ? (
+                <span className="post-excerpt">{post.excerpt}</span>
+              ) : null}
+            </Link>
+            {tags.length ? (
+              <span className="post-tags">
+                {tags.slice(0, 4).map((tag) => (
+                  <Link key={tag.id} href={`/tag/${tag.slug}`}>
+                    {tag.name}
+                  </Link>
+                ))}
+              </span>
+            ) : (
+              <span className="post-tags post-tags-empty" aria-hidden="true" />
+            )}
+            <span className="post-kind">{post.type}</span>
+          </article>
+        );
+      })}
     </div>
   );
 }
@@ -311,7 +323,7 @@ function Post(props: ThemePostProps) {
       <Link href={backHref} className="back-link article-back-link">
         ← cd {post.type === "project" ? "/projects" : "/posts"}
       </Link>
-      <article className={`article ${hasToc ? "article-with-toc" : ""}`}>
+      <article className={`article ${hasToc ? "article-with-toc" : ""}`} aria-label={post.title}>
         {hasToc ? <PostToc items={rendered.toc} /> : null}
 
         <div className="article-main">
@@ -325,7 +337,6 @@ function Post(props: ThemePostProps) {
               ) : null}
               <span>{readingTime}</span>
             </div>
-            <h1 className="article-title">{post.title}</h1>
             {post.excerpt ? <p className="article-excerpt">{post.excerpt}</p> : null}
           </header>
 
@@ -387,6 +398,11 @@ function Archive(props: ThemeArchiveProps) {
 
   return (
     <Shell settings={props.settings} navLinks={props.navLinks}>
+      {props.backHref ? (
+        <Link href={props.backHref} className="back-link article-back-link">
+          ← cd {props.backLabel ?? "/posts"}
+        </Link>
+      ) : null}
       <div className="archive-header">
         <PromptBlock title={props.settings.siteTitle} command={command} />
         <h1 className="archive-title">{props.title}</h1>

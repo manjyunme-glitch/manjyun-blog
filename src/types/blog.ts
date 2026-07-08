@@ -15,6 +15,7 @@ export type PostRecord = {
   seoDescription: string | null;
   createdAt: string;
   updatedAt: string;
+  tags?: TagRecord[];
 };
 
 export type TagRecord = {
