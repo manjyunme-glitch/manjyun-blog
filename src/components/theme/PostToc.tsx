@@ -69,7 +69,6 @@ export function PostToc({ items }: { items: TocItem[] }) {
     jumping: false,
     ready: false
   });
-  const [open, setOpen] = useState(false);
   const listRef = useRef<HTMLDivElement | null>(null);
   const linkRefs = useRef(new Map<string, HTMLAnchorElement>());
   const animationFrameRef = useRef<number | null>(null);
@@ -263,69 +262,47 @@ export function PostToc({ items }: { items: TocItem[] }) {
       },
       animationFrameRef
     );
-    setOpen(false);
   }
 
   return (
-    <>
-      <button
-        className="toc-mobile-toggle"
-        type="button"
-        aria-label="打开文章目录"
-        aria-expanded={open}
-        onClick={() => setOpen((current) => !current)}
-      >
-        目录
-      </button>
-      <nav
-        className={`toc ${open ? "is-open" : ""} ${visible ? "is-visible" : ""}`}
-        aria-label="Article sections"
-        aria-hidden={!visible && !open}
-      >
-        <div className="toc-title">
-          <span>目录</span>
-          <button
-            className="toc-close"
-            type="button"
-            aria-label="关闭文章目录"
-            onClick={() => setOpen(false)}
-          >
-            ×
-          </button>
-        </div>
-        <div className="toc-links" ref={listRef}>
-          <span
-            className={`toc-indicator ${indicator.moving ? "is-moving" : ""} ${indicator.jumping ? "is-jumping" : ""}`}
-            aria-hidden="true"
-            style={{
-              height: `${indicator.height}px`,
-              opacity: indicator.ready ? 1 : 0,
-              transform: `translateY(${indicator.top}px)`
+    <nav
+      className={`toc ${visible ? "is-visible" : ""}`}
+      aria-label="Article sections"
+      aria-hidden={!visible}
+    >
+      <div className="toc-title">目录</div>
+      <div className="toc-links" ref={listRef}>
+        <span
+          className={`toc-indicator ${indicator.moving ? "is-moving" : ""} ${indicator.jumping ? "is-jumping" : ""}`}
+          aria-hidden="true"
+          style={{
+            height: `${indicator.height}px`,
+            opacity: indicator.ready ? 1 : 0,
+            transform: `translateY(${indicator.top}px)`
+          }}
+        />
+        {items.map((item) => (
+          <a
+            key={item.id}
+            ref={(node) => {
+              if (node) {
+                linkRefs.current.set(item.id, node);
+              } else {
+                linkRefs.current.delete(item.id);
+              }
             }}
-          />
-          {items.map((item) => (
-            <a
-              key={item.id}
-              ref={(node) => {
-                if (node) {
-                  linkRefs.current.set(item.id, node);
-                } else {
-                  linkRefs.current.delete(item.id);
-                }
-              }}
-              className={`toc-link toc-h${item.level} ${activeId === item.id ? "is-active" : ""}`}
-              href={`#${item.id}`}
-              aria-current={activeId === item.id ? "true" : undefined}
-              onClick={(event) => {
-                event.preventDefault();
-                jumpTo(item);
-              }}
-            >
-              {item.text}
-            </a>
-          ))}
-        </div>
-      </nav>
-    </>
+            className={`toc-link toc-h${item.level} ${activeId === item.id ? "is-active" : ""}`}
+            href={`#${item.id}`}
+            aria-current={activeId === item.id ? "true" : undefined}
+            onClick={(event) => {
+              event.preventDefault();
+              jumpTo(item);
+            }}
+          >
+            {item.text}
+          </a>
+        ))}
+      </div>
+    </nav>
   );
 }

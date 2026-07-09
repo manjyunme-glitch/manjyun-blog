@@ -970,33 +970,12 @@ img {
   pointer-events: none;
 }
 
-.toc-mobile-toggle {
-  display: none;
-}
-
 .toc-title {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
   color: var(--muted);
   font-family: var(--mono);
   font-size: 0.72rem;
   letter-spacing: 0;
   text-transform: uppercase;
-}
-
-.toc-close {
-  display: none;
-  width: 28px;
-  height: 28px;
-  place-items: center;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: transparent;
-  color: var(--muted);
-  cursor: pointer;
-  font-family: var(--mono);
 }
 
 .toc-links {
@@ -2291,114 +2270,16 @@ img {
   }
 
   .article-with-toc {
-    --toc-float-right: calc((100vw - 100dvw) + env(safe-area-inset-right, 0px) + 2rem);
-    --toc-float-bottom: calc((100vh - 100dvh) + env(safe-area-inset-bottom, 0px) + 2rem);
-    --toc-button-offset: 50px;
-    --toc-panel-offset: 100px;
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: 0;
+    display: block;
     width: min(var(--article-width), 100%);
   }
 
   .article-with-toc > .article-main {
-    grid-column: 1;
     width: 100%;
   }
 
-  .toc-mobile-toggle {
-    position: fixed;
-    top: auto;
-    right: var(--toc-float-right);
-    bottom: calc(var(--toc-float-bottom) + var(--toc-button-offset));
-    z-index: 120;
-    display: grid;
-    width: 40px;
-    height: 40px;
-    place-items: center;
-    border: 1px solid rgba(224, 221, 213, 0.12);
-    border-radius: 999px;
-    background: rgba(14, 14, 14, 0.6);
-    color: var(--muted);
-    cursor: pointer;
-    font-family: var(--mono);
-    font-size: 0;
-    opacity: 0.52;
-    padding: 0;
-    -webkit-backdrop-filter: blur(12px);
-    backdrop-filter: blur(12px);
-    box-shadow: 0 12px 34px rgba(0, 0, 0, 0.28);
-    transition: opacity 0.18s var(--ease), border-color 0.18s var(--ease),
-      background 0.18s var(--ease), color 0.18s var(--ease), transform 0.18s var(--ease);
-  }
-
-  .toc-mobile-toggle::before {
-    content: "";
-    width: 12px;
-    height: 2px;
-    border-radius: 999px;
-    background: currentColor;
-    box-shadow: 0 -4px 0 currentColor, 0 4px 0 currentColor;
-  }
-
-  .toc-mobile-toggle:hover,
-  .toc-mobile-toggle[aria-expanded="true"] {
-    border-color: rgba(224, 221, 213, 0.2);
-    background: rgba(14, 14, 14, 0.76);
-    color: var(--text-soft);
-    opacity: 0.8;
-    transform: translateY(-2px);
-  }
-
-  .toc-mobile-toggle:focus-visible {
-    outline: 0;
-    border-color: rgba(224, 221, 213, 0.28);
-    box-shadow: 0 0 0 3px rgba(224, 221, 213, 0.08), 0 12px 34px rgba(0, 0, 0, 0.28);
-  }
-
   .article-with-toc .toc {
-    position: fixed;
-    top: auto;
-    right: var(--toc-float-right);
-    bottom: calc(var(--toc-float-bottom) + var(--toc-panel-offset));
-    left: auto;
-    z-index: 119;
-    width: min(360px, calc(100vw - 2rem));
-    max-height: min(54vh, 420px);
-    margin: 0;
-    overflow: hidden;
-    padding: 0.85rem;
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    background: rgba(14, 14, 14, 0.97);
-    box-shadow: 0 22px 64px rgba(0, 0, 0, 0.46);
-    opacity: 0;
-    pointer-events: none;
-    visibility: hidden;
-    transform: translateY(10px) scale(0.985);
-    transform-origin: bottom right;
-    transition: opacity 0.18s var(--ease), transform 0.18s var(--ease),
-      visibility 0.18s var(--ease);
-  }
-
-  .article-with-toc .toc::before {
-    content: none;
-  }
-
-  .article-with-toc .toc.is-open {
-    opacity: 1;
-    pointer-events: auto;
-    transform: translateY(0) scale(1);
-    visibility: visible;
-  }
-
-  .toc-close {
-    display: grid;
-  }
-
-  .toc-links {
-    max-height: calc(min(54vh, 420px) - 3.4rem);
-    padding-right: 0.2rem;
+    display: none;
   }
 }
 
@@ -2407,27 +2288,6 @@ img {
     position: relative;
     padding: 0.8rem 1.3rem;
     backdrop-filter: none;
-  }
-
-  .article-with-toc .toc {
-    left: calc(env(safe-area-inset-left, 0px) + 2rem);
-    width: auto;
-  }
-
-  .toc-mobile-toggle {
-    right: calc(env(safe-area-inset-right, 0px) + 2rem);
-    bottom: calc(env(safe-area-inset-bottom, 0px) + 2rem + var(--toc-button-offset));
-  }
-
-  .article-with-toc .toc {
-    right: calc(env(safe-area-inset-right, 0px) + 2rem);
-    bottom: calc(env(safe-area-inset-bottom, 0px) + 2rem + var(--toc-panel-offset));
-    max-height: min(38vh, 310px);
-    background: #0e0e0e;
-  }
-
-  .article-with-toc .toc .toc-links {
-    max-height: calc(min(38vh, 310px) - 3.4rem);
   }
 
   .public-wrap {
