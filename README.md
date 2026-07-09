@@ -50,7 +50,7 @@ mkdir -p /share/DockerData/manjyun-blog/uploads
 - `GITHUB_REPOSITORY` / `GITHUB_BRANCH`：后台“检查 GitHub 更新”用于查询远端提交，默认是本仓库 `main`；构建期也会用它们在 `.git` 不可用时兜底写入 `.build-info.json`
 - `GIT_COMMIT`：当前 Docker 构建对应的提交 SHA。留空时 Docker 构建会尝试从构建上下文的 `.git/HEAD` 写入 `.build-info.json`，并通过 `BUILDKIT_CONTEXT_KEEP_GIT_DIR=1` 尽量保留 Git 元数据
 - `PORTAINER_URL` / `PORTAINER_STACK_ID` / `PORTAINER_API_KEY`：可选。若 Portainer CE 部署后仍无法从镜像内识别 commit，后台会读取该 stack 的 `GitConfig.ConfigHash` 作为当前部署版本；只读 API token 即可
-- `STACK_HTTP_PROXY` / `STACK_HTTPS_PROXY`：Portainer 构建镜像需要代理时再填写
+- `STACK_HTTP_PROXY` / `STACK_HTTPS_PROXY`：Portainer 构建镜像或应用抓取外网站点图标需要代理时填写；代理地址必须能从容器内访问
 
 3. 在 Portainer 创建 Git Stack：
 

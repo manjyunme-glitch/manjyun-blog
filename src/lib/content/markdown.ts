@@ -24,12 +24,25 @@ function inferCodeLanguage(language: string, body: string) {
   return "";
 }
 
+function normalizeCodeBlock(body: string) {
+  const lines = body.replace(/\r\n?/g, "\n").split("\n");
+  while (lines.length && !lines[0].trim()) lines.shift();
+  while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
+
+  const contentLines = lines.filter((line) => line.trim());
+  const commonIndent = contentLines.length
+    ? Math.min(...contentLines.map((line) => line.match(/^[\t ]*/)?.[0].length ?? 0))
+    : 0;
+
+  return lines.map((line) => line.slice(commonIndent)).join("\n").trimEnd();
+}
+
 function preprocessCards(markdown: string) {
   return markdown
     .replace(
       /\[code(?::([a-z0-9_-]+))?\]([\s\S]*?)\[\/code\]/gi,
       (_match, language = "", body: string) => {
-        const code = body.trim();
+        const code = normalizeCodeBlock(body);
         const normalizedLanguage = inferCodeLanguage(language, code);
         const className = normalizedLanguage ? ` class="language-${normalizedLanguage}"` : "";
         return `<pre class="mj-code-block"><code${className}>${escapeHtml(code)}</code></pre>`;

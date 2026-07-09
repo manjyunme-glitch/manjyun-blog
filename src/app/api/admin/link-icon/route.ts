@@ -6,6 +6,7 @@ import path from "node:path";
 import tls from "node:tls";
 import { NextResponse } from "next/server";
 import { requireAdminForApi } from "@/lib/auth/session";
+import { proxyForUrl } from "@/lib/net/proxy";
 import { ensureUploadsDir, getUploadsDir } from "@/lib/paths";
 
 export const dynamic = "force-dynamic";
@@ -72,36 +73,6 @@ function findIcon(html: string, baseUrl: URL) {
 
 function fallbackIconUrl(target: URL) {
   return new URL("/favicon.ico", target).toString();
-}
-
-function shouldBypassProxy(hostname: string) {
-  const rules = (process.env.NO_PROXY ?? process.env.no_proxy ?? "")
-    .split(",")
-    .map((rule) => rule.trim().toLowerCase())
-    .filter(Boolean);
-  const host = hostname.toLowerCase();
-  return rules.some((rule) => {
-    if (rule === "*") return true;
-    if (rule.startsWith(".")) return host.endsWith(rule);
-    return host === rule || host.endsWith(`.${rule}`);
-  });
-}
-
-function proxyForUrl(target: URL) {
-  if (shouldBypassProxy(target.hostname)) return null;
-  const raw =
-    target.protocol === "https:"
-      ? process.env.HTTPS_PROXY ?? process.env.https_proxy ?? process.env.HTTP_PROXY ?? process.env.http_proxy
-      : process.env.HTTP_PROXY ?? process.env.http_proxy;
-  const fallback = process.env.ALL_PROXY ?? process.env.all_proxy;
-  const proxy = raw || fallback;
-  if (!proxy) return null;
-  try {
-    const url = new URL(proxy);
-    return url.protocol === "http:" || url.protocol === "https:" ? url : null;
-  } catch {
-    return null;
-  }
 }
 
 function headersFromResponse(headers: http.IncomingHttpHeaders) {
@@ -223,7 +194,7 @@ function requestHttpsViaProxy(target: URL, proxy: URL, headers: Record<string, s
     const proxyClient = proxy.protocol === "https:" ? https : http;
     const connectRequest = proxyClient.request({
       hostname: proxy.hostname,
-      port: proxy.port || 80,
+      port: proxy.port || (proxy.protocol === "https:" ? 443 : 80),
       method: "CONNECT",
       path: `${target.hostname}:${target.port || 443}`,
       headers: auth ? { "Proxy-Authorization": auth } : undefined,

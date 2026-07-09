@@ -41,6 +41,20 @@ test("markdown renderer supports compatible code blocks and task lists", () => {
   assert.match(rendered.html, /type="checkbox"/);
 });
 
+test("compatible code blocks remove shared indentation", () => {
+  const rendered = renderMarkdown(`[code]
+    {
+      "blog": "www.manjyun.top",
+      "motto": "能自建的绝不用别人的，能折腾的绝不躺平。"
+    }
+[/code]`);
+
+  assert.match(
+    rendered.html,
+    /<code class="language-json">\{\n  "blog": "www\.manjyun\.top",\n  "motto": "能自建的绝不用别人的，能折腾的绝不躺平。"\n\}<\/code>/
+  );
+});
+
 test("theme registry returns the default theme", () => {
   assert.equal(getThemes().length, 1);
   assert.equal(getTheme("missing").meta.id, "manjyun-console");
