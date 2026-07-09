@@ -41,7 +41,7 @@ test("markdown renderer supports compatible code blocks and task lists", () => {
   assert.match(rendered.html, /type="checkbox"/);
 });
 
-test("compatible code blocks remove shared indentation", () => {
+test("compatible code blocks preserve indentation exactly", () => {
   const rendered = renderMarkdown(`[code]
     {
       "blog": "www.manjyun.top",
@@ -51,7 +51,7 @@ test("compatible code blocks remove shared indentation", () => {
 
   assert.match(
     rendered.html,
-    /<code class="language-json">\{\n  "blog": "www\.manjyun\.top",\n  "motto": "能自建的绝不用别人的，能折腾的绝不躺平。"\n\}<\/code>/
+    /<code class="language-json">    \{\n      "blog": "www\.manjyun\.top",\n      "motto": "能自建的绝不用别人的，能折腾的绝不躺平。"\n    \}<\/code>/
   );
 });
 

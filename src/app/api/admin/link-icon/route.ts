@@ -7,6 +7,7 @@ import tls from "node:tls";
 import { NextResponse } from "next/server";
 import { requireAdminForApi } from "@/lib/auth/session";
 import { proxyForUrl } from "@/lib/net/proxy";
+import { tunneledHttpsRequestOptions } from "@/lib/net/tunnel";
 import { ensureUploadsDir, getUploadsDir } from "@/lib/paths";
 
 export const dynamic = "force-dynamic";
@@ -192,12 +193,16 @@ function requestHttpsViaProxy(target: URL, proxy: URL, headers: Record<string, s
   return new Promise<FetchResult>((resolve, reject) => {
     const auth = proxyAuthHeader(proxy);
     const proxyClient = proxy.protocol === "https:" ? https : http;
+    const authority = `${target.hostname}:${target.port || 443}`;
     const connectRequest = proxyClient.request({
       hostname: proxy.hostname,
       port: proxy.port || (proxy.protocol === "https:" ? 443 : 80),
       method: "CONNECT",
-      path: `${target.hostname}:${target.port || 443}`,
-      headers: auth ? { "Proxy-Authorization": auth } : undefined,
+      path: authority,
+      headers: {
+        Host: authority,
+        ...(auth ? { "Proxy-Authorization": auth } : {})
+      },
       timeout: timeoutMs
     });
 
@@ -215,21 +220,7 @@ function requestHttpsViaProxy(target: URL, proxy: URL, headers: Record<string, s
       secureSocket.on("error", reject);
       secureSocket.on("secureConnect", () => {
         const request = https.request(
-          {
-            protocol: "https:",
-            hostname: target.hostname,
-            port: target.port || 443,
-            path: `${target.pathname}${target.search}`,
-            method: "GET",
-            headers: {
-              ...headers,
-              Host: target.host,
-              Connection: "close"
-            },
-            createConnection: () => secureSocket,
-            agent: false,
-            timeout: timeoutMs
-          },
+          tunneledHttpsRequestOptions(target, headers, secureSocket, timeoutMs),
           (iconResponse) => {
             collectResponse(iconResponse, iconResponse.headers.location ? new URL(iconResponse.headers.location, target).toString() : target.toString(), maxBytes)
               .then(resolve)
