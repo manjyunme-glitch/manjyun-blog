@@ -1977,12 +1977,88 @@ img {
 
 .revision-card {
   display: grid;
-  gap: 0.75rem;
+  gap: 0;
 }
 
 .revision-head {
   align-items: center;
   margin-bottom: 0;
+}
+
+.revision-toggle {
+  display: inline-flex;
+  min-height: 30px;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.22rem 0.34rem 0.22rem 0.42rem;
+  border: 1px solid #3a2d1d;
+  border-radius: 6px;
+  background: #19140e;
+  color: #b69a76;
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: 0.67rem;
+  transition: border-color 0.18s var(--ease), background 0.18s var(--ease),
+    color 0.18s var(--ease);
+}
+
+.revision-toggle:hover {
+  border-color: rgba(255, 190, 92, 0.5);
+  background: #21180e;
+  color: #ffc46b;
+}
+
+.revision-toggle .chip {
+  min-height: 20px;
+  padding: 0.12rem 0.38rem;
+  border-color: rgba(255, 190, 92, 0.32);
+  background: rgba(232, 168, 76, 0.1);
+  color: #dca85e;
+}
+
+.revision-toggle svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.7;
+  transition: transform 0.24s var(--ease);
+}
+
+.revision-card.is-open .revision-toggle svg {
+  transform: rotate(180deg);
+}
+
+.revision-collapse {
+  display: grid;
+  grid-template-rows: 1fr;
+  opacity: 1;
+  visibility: visible;
+  transition: grid-template-rows 0.26s var(--ease), opacity 0.18s ease,
+    visibility 0s linear;
+}
+
+.revision-card.is-collapsed .revision-collapse {
+  grid-template-rows: 0fr;
+  opacity: 0;
+  visibility: hidden;
+  transition: grid-template-rows 0.26s var(--ease), opacity 0.14s ease,
+    visibility 0s linear 0.26s;
+}
+
+.revision-collapse-inner {
+  display: grid;
+  min-height: 0;
+  gap: 0.75rem;
+  overflow: hidden;
+  padding-top: 0.75rem;
+  transition: padding-top 0.26s var(--ease);
+}
+
+.revision-card.is-collapsed .revision-collapse-inner {
+  padding-top: 0;
 }
 
 .revision-list {
@@ -2001,11 +2077,38 @@ img {
   padding: 0.25rem;
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: var(--surface);
+  background: #120f0b;
 }
 
 .revision-tabs .seg-btn {
   flex: 1 1 88px;
+  border-color: #302518;
+  background: #1a1510;
+  color: #9f8567;
+  cursor: pointer;
+}
+
+.revision-tabs .seg-btn span {
+  color: #806a50;
+}
+
+.revision-tabs .seg-btn:hover {
+  border-color: #594127;
+  background: #22190f;
+  color: #d9a75f;
+}
+
+.revision-tabs .seg-btn.is-active {
+  border-color: rgba(255, 190, 92, 0.62);
+  background:
+    linear-gradient(180deg, rgba(255, 196, 107, 0.13), transparent),
+    rgba(232, 168, 76, 0.18);
+  color: #ffc46b;
+  box-shadow: inset 0 1px 0 rgba(255, 218, 160, 0.08);
+}
+
+.revision-tabs .seg-btn.is-active span {
+  color: #ffd28d;
 }
 
 .revision-item {

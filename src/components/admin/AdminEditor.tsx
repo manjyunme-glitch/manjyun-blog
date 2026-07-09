@@ -76,6 +76,7 @@ export function AdminEditor({
   const [message, setMessage] = useState("");
   const [preview, setPreview] = useState("");
   const [helpOpen, setHelpOpen] = useState(false);
+  const [revisionOpen, setRevisionOpen] = useState(false);
   const [draft, setDraft] = useState<Draft>(() => draftFromPost(post));
   const [revisionItems, setRevisionItems] = useState<PostRevision[]>(revisions);
   const [revisionFilter, setRevisionFilter] = useState<RevisionFilter>("all");
@@ -411,75 +412,95 @@ export function AdminEditor({
 
       <aside className="editor-side">
         {draft.id ? (
-          <section className="settings-card revision-card">
+          <section className={`settings-card revision-card ${revisionOpen ? "is-open" : "is-collapsed"}`}>
             <div className="settings-section-head revision-head">
               <div>
                 <h2>版本历史</h2>
               </div>
-              <span className="chip">{revisionItems.length}</span>
+              <button
+                className="revision-toggle"
+                type="button"
+                aria-expanded={revisionOpen}
+                aria-controls="revision-history-content"
+                onClick={() => setRevisionOpen((open) => !open)}
+              >
+                <span className="chip">{revisionItems.length}</span>
+                <span>{revisionOpen ? "收起" : "展开"}</span>
+                <svg viewBox="0 0 16 16" aria-hidden="true">
+                  <path d="m4 6 4 4 4-4" />
+                </svg>
+              </button>
             </div>
-            {revisionItems.length ? (
-              <>
-                <div className="revision-tabs" role="tablist" aria-label="版本状态筛选">
-                  {revisionFilters.map((filter) => (
-                    <button
-                      key={filter.id}
-                      className={`seg-btn ${revisionFilter === filter.id ? "is-active" : ""}`}
-                      type="button"
-                      role="tab"
-                      aria-selected={revisionFilter === filter.id}
-                      onClick={() => setRevisionFilter(filter.id)}
-                    >
-                      {filter.label}
-                      <span>{revisionCounts[filter.id]}</span>
-                    </button>
-                  ))}
-                </div>
-                <div className="revision-list">
-                  {visibleRevisions.map((revision, index) => (
-                    <button
-                      key={revision.id}
-                      className={`revision-item ${selectedRevisionId === revision.id ? "is-active" : ""}`}
-                      type="button"
-                      aria-pressed={selectedRevisionId === revision.id}
-                      onClick={() => setSelectedRevisionId(revision.id)}
-                    >
-                      <span>
-                        <strong>{revisionVersionLabel(revision, index, visibleRevisions.length)}</strong>
-                        <small>{formatRevisionTime(revision.createdAt)}</small>
-                      </span>
-                      <span className={`status-pill ${revision.status}`}>
-                        {statusText(revision.status, false)}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-                {selectedRevision ? (
-                  <div className="revision-preview">
-                    <div className="revision-preview-head">
-                      <strong>{selectedRevision.title}</strong>
-                      <small>
-                        {revisionReasonText(selectedRevision.reason)} · {formatRevisionTime(selectedRevision.createdAt)}
-                      </small>
-                      <code>{selectedRevision.slug}</code>
+            <div
+              id="revision-history-content"
+              className="revision-collapse"
+              aria-hidden={!revisionOpen}
+            >
+              <div className="revision-collapse-inner">
+                {revisionItems.length ? (
+                  <>
+                    <div className="revision-tabs" role="tablist" aria-label="版本状态筛选">
+                      {revisionFilters.map((filter) => (
+                        <button
+                          key={filter.id}
+                          className={`seg-btn ${revisionFilter === filter.id ? "is-active" : ""}`}
+                          type="button"
+                          role="tab"
+                          aria-selected={revisionFilter === filter.id}
+                          onClick={() => setRevisionFilter(filter.id)}
+                        >
+                          {filter.label}
+                          <span>{revisionCounts[filter.id]}</span>
+                        </button>
+                      ))}
                     </div>
-                    <pre>{selectedRevision.markdown.slice(0, 680) || "空内容"}</pre>
-                    <button
-                      className="btn primary"
-                      type="button"
-                      disabled={pending}
-                      onClick={() => void restoreRevision(selectedRevision.id)}
-                    >
-                      回退为{statusText(selectedRevision.status, false)}版本
-                    </button>
-                  </div>
-                ) : visibleRevisions.length ? null : (
-                  <p className="empty-state">这个状态下暂无历史版本。</p>
+                    <div className="revision-list">
+                      {visibleRevisions.map((revision, index) => (
+                        <button
+                          key={revision.id}
+                          className={`revision-item ${selectedRevisionId === revision.id ? "is-active" : ""}`}
+                          type="button"
+                          aria-pressed={selectedRevisionId === revision.id}
+                          onClick={() => setSelectedRevisionId(revision.id)}
+                        >
+                          <span>
+                            <strong>{revisionVersionLabel(revision, index, visibleRevisions.length)}</strong>
+                            <small>{formatRevisionTime(revision.createdAt)}</small>
+                          </span>
+                          <span className={`status-pill ${revision.status}`}>
+                            {statusText(revision.status, false)}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                    {selectedRevision ? (
+                      <div className="revision-preview">
+                        <div className="revision-preview-head">
+                          <strong>{selectedRevision.title}</strong>
+                          <small>
+                            {revisionReasonText(selectedRevision.reason)} · {formatRevisionTime(selectedRevision.createdAt)}
+                          </small>
+                          <code>{selectedRevision.slug}</code>
+                        </div>
+                        <pre>{selectedRevision.markdown.slice(0, 680) || "空内容"}</pre>
+                        <button
+                          className="btn primary"
+                          type="button"
+                          disabled={pending}
+                          onClick={() => void restoreRevision(selectedRevision.id)}
+                        >
+                          回退为{statusText(selectedRevision.status, false)}版本
+                        </button>
+                      </div>
+                    ) : visibleRevisions.length ? null : (
+                      <p className="empty-state">这个状态下暂无历史版本。</p>
+                    )}
+                  </>
+                ) : (
+                  <p className="empty-state">暂无历史版本。</p>
                 )}
-              </>
-            ) : (
-              <p className="empty-state">暂无历史版本。</p>
-            )}
+              </div>
+            </div>
           </section>
         ) : null}
 
