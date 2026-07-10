@@ -41,6 +41,7 @@ export type PostRevision = {
   publishedAt: string | null;
   seoTitle: string | null;
   seoDescription: string | null;
+  tags: string[] | null;
   postCreatedAt: string;
   postUpdatedAt: string;
   reason: string;

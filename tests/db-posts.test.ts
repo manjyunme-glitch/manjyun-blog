@@ -4,18 +4,24 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-test("post publishing keeps first published time and revisions restore linearly", async () => {
+test("post publishing preserves first publish time and safe revision history", async () => {
   const root = mkdtempSync(path.join(tmpdir(), "manjyun-db-"));
   process.env.DATA_DIR = root;
   process.env.UPLOADS_DIR = path.join(root, "uploads");
   process.env.DATABASE_PATH = path.join(root, "manjyun.sqlite");
 
   const {
+    getAdjacentPosts,
+    getPostById,
+    getSiteSettings,
+    getTagBySlug,
     listPosts,
     listPostRevisions,
+    replaceNavLinks,
     restorePostRevision,
     savePost,
-    setPostStatus
+    setPostStatus,
+    updateSiteConfiguration
   } = await import("@/lib/db/queries");
 
   const firstAutoSlug = savePost({
@@ -85,12 +91,32 @@ test("post publishing keeps first published time and revisions restore linearly"
   assert.equal(restored?.publishedAt, firstPublishedAt);
 
   const revisionsAfterRestore = listPostRevisions(published.id);
-  assert.ok(
-    revisionsAfterRestore.every((revision) => revision.id < originalRevision.id)
+  assert.ok(revisionsAfterRestore.some((revision) => revision.id === originalRevision.id));
+  assert.ok(revisionsAfterRestore.some((revision) => revision.reason === "restore-before"));
+
+  const tagged = savePost({
+    type: "post",
+    title: "Tagged Revision",
+    markdown: "tagged body",
+    status: "draft",
+    tags: ["Old"]
+  });
+  savePost({
+    id: tagged.id,
+    type: "post",
+    title: tagged.title,
+    slug: tagged.slug,
+    markdown: tagged.markdown,
+    status: "draft",
+    tags: ["New"]
+  });
+  const oldTagRevision = listPostRevisions(tagged.id).find(
+    (revision) => revision.tags?.[0] === "Old"
   );
-  assert.equal(
-    revisionsAfterRestore.some((revision) => revision.reason.startsWith("restore")),
-    false
+  assert.ok(oldTagRevision);
+  assert.deepEqual(
+    restorePostRevision(tagged.id, oldTagRevision.id)?.tags.map((tag) => tag.name),
+    ["Old"]
   );
 
   const workflow = savePost({
@@ -170,4 +196,92 @@ test("post publishing keeps first published time and revisions restore linearly"
   const restoredDraft = restorePostRevision(draftWorkflow.id, draftRevision.id);
   assert.equal(restoredDraft?.status, "draft");
   assert.equal(restoredDraft?.markdown, "published body");
+
+  const cpp = savePost({
+    type: "post",
+    title: "C++",
+    markdown: "cpp",
+    status: "published",
+    tags: ["C++"]
+  });
+  const csharp = savePost({
+    type: "post",
+    title: "C#",
+    markdown: "csharp",
+    status: "published",
+    tags: ["C#"]
+  });
+  assert.deepEqual(getPostById(cpp.id)?.tags.map((tag) => [tag.slug, tag.name]), [["c", "C++"]]);
+  assert.deepEqual(getPostById(csharp.id)?.tags.map((tag) => [tag.slug, tag.name]), [["c-2", "C#"]]);
+
+  const tiedAt = "2026-01-01T00:00:00.000Z";
+  const tiedA = savePost({
+    type: "post",
+    title: "Tied A",
+    markdown: "a",
+    status: "published",
+    publishedAt: tiedAt,
+    tags: []
+  });
+  const tiedB = savePost({
+    type: "post",
+    title: "Tied B",
+    markdown: "b",
+    status: "published",
+    publishedAt: tiedAt,
+    tags: []
+  });
+  assert.equal(getAdjacentPosts(tiedA).next?.id, tiedB.id);
+  assert.equal(getAdjacentPosts(tiedB).prev?.id, tiedA.id);
+
+  const draftOnly = savePost({
+    type: "post",
+    title: "Draft Tag",
+    markdown: "draft",
+    status: "draft",
+    tags: ["DraftOnly"]
+  });
+  assert.ok(draftOnly.tags.some((tag) => tag.slug === "draftonly"));
+  assert.equal(getTagBySlug("draftonly"), null);
+
+  const originalSiteTitle = getSiteSettings().siteTitle;
+  assert.throws(() =>
+    updateSiteConfiguration({
+      settings: { siteTitle: "Must roll back" },
+      modules: [
+        {
+          id: "invalid-config",
+          enabled: true,
+          sortOrder: 999,
+          config: { unsupported: 1n }
+        }
+      ],
+      mainLinks: [],
+      frequentLinks: []
+    })
+  );
+  assert.equal(getSiteSettings().siteTitle, originalSiteTitle);
+
+  replaceNavLinks("main", []);
+  const { getDb } = await import("@/lib/db/client");
+  const { ensureSchema } = await import("@/lib/db/schema");
+  getDb().prepare("DELETE FROM settings WHERE key = ?").run("system.seed.main_nav.v1");
+  ensureSchema(getDb());
+  assert.deepEqual(
+    (await import("@/lib/db/queries")).getNavLinks("main"),
+    []
+  );
+
+  const { get, run, transaction } = await import("@/lib/db/client");
+  assert.throws(() =>
+    transaction(() => {
+      run("INSERT INTO settings (key, value) VALUES (?, ?)", ["test.outer", "1"]);
+      transaction(() => {
+        run("INSERT INTO settings (key, value) VALUES (?, ?)", ["test.inner", "1"]);
+        throw new Error("rollback nested write");
+      });
+    })
+  );
+  assert.equal(get("SELECT value FROM settings WHERE key = ?", ["test.outer"]), null);
+  assert.equal(get("SELECT value FROM settings WHERE key = ?", ["test.inner"]), null);
 });

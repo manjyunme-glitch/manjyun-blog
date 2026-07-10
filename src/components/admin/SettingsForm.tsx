@@ -232,16 +232,12 @@ export function SettingsForm({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           settings: form,
+          modules: homeModules,
           mainLinks: toSaveLinks(mainNav),
           frequentLinks: toSaveLinks(frequentNav)
         })
       });
-      const modulesResponse = await fetch("/api/admin/home-modules", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ modules: homeModules })
-      });
-      if (!settingsResponse.ok || !modulesResponse.ok) {
+      if (!settingsResponse.ok) {
         setMessage("保存失败");
         return;
       }
@@ -589,7 +585,7 @@ function EditableLinks({
                 <input
                   className="visually-hidden"
                   type="file"
-                  accept="image/*"
+                  accept="image/jpeg,image/png,image/gif,image/webp,image/avif,image/x-icon"
                   onChange={(event) => {
                     const file = event.target.files?.[0];
                     if (file) void onUploadIcon(group, link.localId, file);

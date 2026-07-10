@@ -1,4 +1,4 @@
-import { all, exec, get, run } from "@/lib/db/client";
+import { all, get, run, transaction } from "@/lib/db/client";
 import { slugify, splitCommaList } from "@/lib/content/slug";
 import type {
   HomeModule,
@@ -17,6 +17,9 @@ import type {
 type SettingRow = { key: string; value: string };
 type CountRow = { count: number };
 type IdRow = { id: number };
+type StoredPostRevision = Omit<PostRevision, "tags"> & {
+  tagsJson: string | null;
+};
 
 export type SavePostInput = {
   id?: number;
@@ -82,14 +85,25 @@ function postSelect(prefix = "p") {
   `;
 }
 
-function normalizeRevision(row: PostRevision): PostRevision {
+function normalizeRevision(row: StoredPostRevision): PostRevision {
+  const { tagsJson, ...revision } = row;
+  let tags: string[] | null = null;
+  if (tagsJson !== null) {
+    try {
+      const parsed = JSON.parse(tagsJson) as unknown;
+      tags = Array.isArray(parsed) ? parsed.map(String) : null;
+    } catch {
+      tags = null;
+    }
+  }
   return {
-    ...row,
-    publishedAt: row.publishedAt ?? null,
-    excerpt: row.excerpt ?? null,
-    cover: row.cover ?? null,
-    seoTitle: row.seoTitle ?? null,
-    seoDescription: row.seoDescription ?? null
+    ...revision,
+    publishedAt: revision.publishedAt ?? null,
+    excerpt: revision.excerpt ?? null,
+    cover: revision.cover ?? null,
+    seoTitle: revision.seoTitle ?? null,
+    seoDescription: revision.seoDescription ?? null,
+    tags
   };
 }
 
@@ -107,6 +121,7 @@ function revisionSelect(prefix = "r") {
     ${prefix}.published_at AS publishedAt,
     ${prefix}.seo_title AS seoTitle,
     ${prefix}.seo_description AS seoDescription,
+    ${prefix}.tags_json AS tagsJson,
     ${prefix}.post_created_at AS postCreatedAt,
     ${prefix}.post_updated_at AS postUpdatedAt,
     ${prefix}.reason,
@@ -126,13 +141,15 @@ export function getSiteSettings(): SiteSettings {
 }
 
 export function updateSiteSettings(input: Partial<SiteSettings>) {
-  for (const [key, value] of Object.entries(input)) {
-    if (!(key in settingDefaults)) continue;
-    run(
-      "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-      [key, String(value ?? "")]
-    );
-  }
+  transaction(() => {
+    for (const [key, value] of Object.entries(input)) {
+      if (!(key in settingDefaults)) continue;
+      run(
+        "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        [key, String(value ?? "")]
+      );
+    }
+  });
 }
 
 export function getHomeModules() {
@@ -152,22 +169,24 @@ export function getHomeModules() {
 }
 
 export function updateHomeModules(modules: HomeModule[]) {
-  for (const module of modules) {
-    run(
-      `INSERT INTO home_modules (id, enabled, sort_order, config)
-       VALUES (?, ?, ?, ?)
-       ON CONFLICT(id) DO UPDATE SET
-         enabled = excluded.enabled,
-         sort_order = excluded.sort_order,
-         config = excluded.config`,
-      [
-        module.id,
-        module.enabled ? 1 : 0,
-        module.sortOrder,
-        JSON.stringify(module.config ?? {})
-      ]
-    );
-  }
+  transaction(() => {
+    for (const module of modules) {
+      run(
+        `INSERT INTO home_modules (id, enabled, sort_order, config)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+           enabled = excluded.enabled,
+           sort_order = excluded.sort_order,
+           config = excluded.config`,
+        [
+          module.id,
+          module.enabled ? 1 : 0,
+          module.sortOrder,
+          JSON.stringify(module.config ?? {})
+        ]
+      );
+    }
+  });
 }
 
 export function updateHomeModuleConfig(id: string, config: Record<string, unknown>) {
@@ -190,20 +209,36 @@ export function getNavLinks(groupName?: NavLink["groupName"]) {
 }
 
 export function replaceNavLinks(groupName: NavLink["groupName"], links: Omit<NavLink, "id" | "groupName">[]) {
-  run("DELETE FROM nav_links WHERE group_name = ?", [groupName]);
-  for (const link of links) {
-    if (!link.label.trim() || !link.url.trim()) continue;
-    run(
-      "INSERT INTO nav_links (group_name, label, url, icon_url, sort_order) VALUES (?, ?, ?, ?, ?)",
-      [
-        groupName,
-        link.label.trim(),
-        link.url.trim(),
-        link.iconUrl?.trim() || null,
-        link.sortOrder
-      ]
-    );
-  }
+  transaction(() => {
+    run("DELETE FROM nav_links WHERE group_name = ?", [groupName]);
+    for (const link of links) {
+      if (!link.label.trim() || !link.url.trim()) continue;
+      run(
+        "INSERT INTO nav_links (group_name, label, url, icon_url, sort_order) VALUES (?, ?, ?, ?, ?)",
+        [
+          groupName,
+          link.label.trim(),
+          link.url.trim(),
+          link.iconUrl?.trim() || null,
+          link.sortOrder
+        ]
+      );
+    }
+  });
+}
+
+export function updateSiteConfiguration(input: {
+  settings: Partial<SiteSettings>;
+  modules: HomeModule[];
+  mainLinks: Omit<NavLink, "id" | "groupName">[];
+  frequentLinks: Omit<NavLink, "id" | "groupName">[];
+}) {
+  transaction(() => {
+    updateSiteSettings(input.settings);
+    updateHomeModules(input.modules);
+    replaceNavLinks("main", input.mainLinks);
+    replaceNavLinks("frequent", input.frequentLinks);
+  });
 }
 
 export function isSetupComplete() {
@@ -288,13 +323,14 @@ function makeSequentialSlug(type: PostType, excludeId?: number) {
   }
 }
 
-function createPostRevision(post: PostRecord, reason = "save") {
+function createPostRevision(post: PostWithTags, reason = "save") {
   const now = new Date().toISOString();
   run(
     `INSERT INTO post_revisions (
       post_id, type, slug, title, markdown, excerpt, cover, status,
-      published_at, seo_title, seo_description, post_created_at, post_updated_at, reason, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      published_at, seo_title, seo_description, tags_json,
+      post_created_at, post_updated_at, reason, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       post.id,
       post.type,
@@ -307,6 +343,7 @@ function createPostRevision(post: PostRecord, reason = "save") {
       post.publishedAt,
       post.seoTitle,
       post.seoDescription,
+      JSON.stringify(post.tags.map((tag) => tag.name)),
       post.createdAt,
       post.updatedAt,
       reason,
@@ -368,6 +405,10 @@ function saveRevisionReason(
 }
 
 export function savePost(input: SavePostInput) {
+  return transaction(() => savePostInternal(input));
+}
+
+function savePostInternal(input: SavePostInput) {
   const title = input.title.trim() || "Untitled";
   const now = new Date().toISOString();
   const existing = input.id ? getPostById(input.id) : null;
@@ -469,12 +510,7 @@ function syncPostTags(postId: number, tagNames: string[]) {
     new Set(tagNames.map((tag) => tag.trim()).filter(Boolean))
   );
   for (const name of names) {
-    const slug = slugify(name, "tag");
-    run(
-      "INSERT INTO tags (slug, name) VALUES (?, ?) ON CONFLICT(slug) DO UPDATE SET name = excluded.name",
-      [slug, name]
-    );
-    const tag = get<IdRow>("SELECT id FROM tags WHERE slug = ?", [slug]);
+    const tag = getOrCreateTag(name);
     if (tag) {
       run("INSERT OR IGNORE INTO post_tags (post_id, tag_id) VALUES (?, ?)", [
         postId,
@@ -482,6 +518,31 @@ function syncPostTags(postId: number, tagNames: string[]) {
       ]);
     }
   }
+  run(
+    "DELETE FROM tags WHERE NOT EXISTS (SELECT 1 FROM post_tags WHERE post_tags.tag_id = tags.id)"
+  );
+}
+
+function sameTagIdentity(left: string, right: string) {
+  return left.localeCompare(right, "en", { sensitivity: "accent" }) === 0;
+}
+
+function getOrCreateTag(name: string) {
+  const existingByName = all<TagRecord>("SELECT id, slug, name FROM tags").find((tag) =>
+    sameTagIdentity(tag.name, name)
+  );
+  if (existingByName) return existingByName;
+
+  const base = slugify(name, "tag");
+  let slug = base;
+  let suffix = 2;
+  while (get<IdRow>("SELECT id FROM tags WHERE slug = ?", [slug])) {
+    slug = `${base}-${suffix}`;
+    suffix += 1;
+  }
+
+  const result = run("INSERT INTO tags (slug, name) VALUES (?, ?)", [slug, name]);
+  return { id: Number(result.lastInsertRowid), slug, name } satisfies TagRecord;
 }
 
 export function listPosts(options: {
@@ -575,10 +636,25 @@ export function getTags() {
 }
 
 export function getTagBySlug(slug: string) {
-  return get<TagRecord>("SELECT id, slug, name FROM tags WHERE slug = ?", [slug]);
+  return get<TagRecord>(
+    `SELECT t.id, t.slug, t.name
+     FROM tags t
+     WHERE t.slug = ?
+       AND EXISTS (
+         SELECT 1
+         FROM post_tags pt
+         INNER JOIN posts p ON p.id = pt.post_id
+         WHERE pt.tag_id = t.id AND p.status = 'published'
+       )`,
+    [slug]
+  );
 }
 
 export function setPostStatus(id: number, status: PostStatus) {
+  return transaction(() => setPostStatusInternal(id, status));
+}
+
+function setPostStatusInternal(id: number, status: PostStatus) {
   const now = new Date().toISOString();
   const existing = getPostById(id);
   if (!existing) return null;
@@ -624,7 +700,7 @@ export function deletePostPermanently(id: number) {
 }
 
 export function listPostRevisions(postId: number, limit = 20) {
-  return all<PostRevision>(
+  return all<StoredPostRevision>(
     `SELECT ${revisionSelect("r")}
      FROM post_revisions r
      WHERE r.post_id = ?
@@ -635,25 +711,25 @@ export function listPostRevisions(postId: number, limit = 20) {
 }
 
 export function restorePostRevision(postId: number, revisionId: number) {
-  const current = getPostById(postId);
-  const revision = get<PostRevision>(
-    `SELECT ${revisionSelect("r")}
-     FROM post_revisions r
-     WHERE r.id = ? AND r.post_id = ?`,
-    [revisionId, postId]
-  );
-  if (!current || !revision) return null;
+  return transaction(() => {
+    const current = getPostById(postId);
+    const revision = get<StoredPostRevision>(
+      `SELECT ${revisionSelect("r")}
+       FROM post_revisions r
+       WHERE r.id = ? AND r.post_id = ?`,
+      [revisionId, postId]
+    );
+    if (!current || !revision) return null;
 
-  const snapshot = normalizeRevision(revision);
-  const now = new Date().toISOString();
-  const slug = makeUniqueSlug(snapshot.type, snapshot.slug || snapshot.title, postId);
-  const publishedAt =
-    snapshot.status === "published"
-      ? (current.publishedAt ?? snapshot.publishedAt ?? now)
-      : (current.publishedAt ?? snapshot.publishedAt ?? null);
+    const snapshot = normalizeRevision(revision);
+    const now = new Date().toISOString();
+    const slug = makeUniqueSlug(snapshot.type, snapshot.slug || snapshot.title, postId);
+    const publishedAt =
+      snapshot.status === "published"
+        ? (current.publishedAt ?? snapshot.publishedAt ?? now)
+        : (current.publishedAt ?? snapshot.publishedAt ?? null);
 
-  exec("BEGIN");
-  try {
+    createPostRevision(current, "restore-before");
     run(
       `UPDATE posts SET
         type = ?,
@@ -683,17 +759,11 @@ export function restorePostRevision(postId: number, revisionId: number) {
         postId
       ]
     );
-    run("DELETE FROM post_revisions WHERE post_id = ? AND id >= ?", [
-      postId,
-      revisionId
-    ]);
-    exec("COMMIT");
-  } catch (error) {
-    exec("ROLLBACK");
-    throw error;
-  }
-
-  return getPostById(postId);
+    if (snapshot.tags !== null) {
+      syncPostTags(postId, snapshot.tags);
+    }
+    return getPostById(postId);
+  });
 }
 
 export function getAdjacentPosts(post: PostRecord) {
@@ -701,16 +771,22 @@ export function getAdjacentPosts(post: PostRecord) {
   const prev = get<PostRecord>(
     `SELECT ${postSelect("p")} FROM posts p
      WHERE p.type = ? AND p.status = 'published' AND p.id != ?
-       AND COALESCE(p.published_at, p.created_at) < ?
-     ORDER BY COALESCE(p.published_at, p.created_at) DESC LIMIT 1`,
-    [post.type, post.id, post.publishedAt]
+       AND (
+         COALESCE(p.published_at, p.created_at) < ?
+         OR (COALESCE(p.published_at, p.created_at) = ? AND p.id < ?)
+       )
+     ORDER BY COALESCE(p.published_at, p.created_at) DESC, p.id DESC LIMIT 1`,
+    [post.type, post.id, post.publishedAt, post.publishedAt, post.id]
   );
   const next = get<PostRecord>(
     `SELECT ${postSelect("p")} FROM posts p
      WHERE p.type = ? AND p.status = 'published' AND p.id != ?
-       AND COALESCE(p.published_at, p.created_at) > ?
-     ORDER BY COALESCE(p.published_at, p.created_at) ASC LIMIT 1`,
-    [post.type, post.id, post.publishedAt]
+       AND (
+         COALESCE(p.published_at, p.created_at) > ?
+         OR (COALESCE(p.published_at, p.created_at) = ? AND p.id > ?)
+       )
+     ORDER BY COALESCE(p.published_at, p.created_at) ASC, p.id ASC LIMIT 1`,
+    [post.type, post.id, post.publishedAt, post.publishedAt, post.id]
   );
   return {
     prev: prev ? normalizePost(prev) : null,

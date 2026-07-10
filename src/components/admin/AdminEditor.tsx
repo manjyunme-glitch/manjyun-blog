@@ -542,6 +542,7 @@ export function AdminEditor({
               ref={fileInputRef}
               className="visually-hidden"
               type="file"
+              accept="image/jpeg,image/png,image/gif,image/webp,image/avif,image/x-icon,audio/mpeg,audio/wav,audio/ogg,audio/flac,audio/mp4,application/pdf"
               disabled={draft.status === "trashed"}
               onChange={(event) => {
                 const file = event.target.files?.[0];
@@ -551,7 +552,7 @@ export function AdminEditor({
             />
             <button className="upload-control" type="button" disabled={draft.status === "trashed"} onClick={() => fileInputRef.current?.click()}>
               <span>选择媒体文件</span>
-              <small>图片插入 Markdown，音频插入 audio 卡片</small>
+              <small>图片插入 Markdown，音频插入 audio 卡片；支持 PDF</small>
             </button>
           </div>
           <p className="admin-subtitle">

@@ -51,6 +51,10 @@ const defaultMainLinks = [
 ] as const;
 
 export function ensureSchema(db: DatabaseSync) {
+  const hadExistingSettingsTable = Boolean(
+    db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'settings'").get()
+  );
+
   db.exec(`
     CREATE TABLE IF NOT EXISTS admin_users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -101,6 +105,7 @@ export function ensureSchema(db: DatabaseSync) {
       published_at TEXT,
       seo_title TEXT,
       seo_description TEXT,
+      tags_json TEXT,
       post_created_at TEXT NOT NULL,
       post_updated_at TEXT NOT NULL,
       reason TEXT NOT NULL DEFAULT 'save',
@@ -177,6 +182,11 @@ export function ensureSchema(db: DatabaseSync) {
     db.exec("ALTER TABLE nav_links ADD COLUMN icon_url TEXT");
   }
 
+  const revisionColumns = db.prepare("PRAGMA table_info(post_revisions)").all() as Array<{ name: string }>;
+  if (!revisionColumns.some((column) => column.name === "tags_json")) {
+    db.exec("ALTER TABLE post_revisions ADD COLUMN tags_json TEXT");
+  }
+
   const settingStmt = db.prepare(
     "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)"
   );
@@ -191,16 +201,23 @@ export function ensureSchema(db: DatabaseSync) {
     moduleStmt.run(id, enabled, sortOrder, JSON.stringify(config));
   }
 
-  const linkCount = db
-    .prepare("SELECT COUNT(*) AS count FROM nav_links WHERE group_name = 'main'")
-    .get() as { count: number };
-  if (linkCount.count === 0) {
-    const linkStmt = db.prepare(
-      "INSERT INTO nav_links (group_name, label, url, sort_order) VALUES (?, ?, ?, ?)"
-    );
-    for (const link of defaultMainLinks) {
-      linkStmt.run(...link);
+  const mainNavSeedKey = "system.seed.main_nav.v1";
+  const mainNavSeeded = db
+    .prepare("SELECT value FROM settings WHERE key = ?")
+    .get(mainNavSeedKey);
+  if (!mainNavSeeded) {
+    const linkCount = db
+      .prepare("SELECT COUNT(*) AS count FROM nav_links WHERE group_name = 'main'")
+      .get() as { count: number };
+    if (!hadExistingSettingsTable && linkCount.count === 0) {
+      const linkStmt = db.prepare(
+        "INSERT INTO nav_links (group_name, label, url, sort_order) VALUES (?, ?, ?, ?)"
+      );
+      for (const link of defaultMainLinks) {
+        linkStmt.run(...link);
+      }
     }
+    settingStmt.run(mainNavSeedKey, "1");
   }
 }
 

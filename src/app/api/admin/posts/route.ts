@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireAdminForApi } from "@/lib/auth/session";
+import { transaction } from "@/lib/db/client";
 import {
   deletePostPermanently,
   getPostById,
@@ -77,23 +78,25 @@ export async function PATCH(request: Request) {
     }
 
     let count = 0;
-    for (const id of ids) {
-      const post = getPostById(id);
-      if (!post) continue;
+    transaction(() => {
+      for (const id of ids) {
+        const post = getPostById(id);
+        if (!post) continue;
 
-      if (action === "publish") {
-        if (setPostStatus(id, "published")) count += 1;
-      } else if (action === "unpublish") {
-        if (setPostStatus(id, "draft")) count += 1;
-      } else if (action === "trash") {
-        if (movePostToTrash(id)) count += 1;
-      } else if (action === "restore") {
-        if (restorePostFromTrash(id)) count += 1;
-      } else if (post.status === "trashed") {
-        deletePostPermanently(id);
-        count += 1;
+        if (action === "publish") {
+          if (setPostStatus(id, "published")) count += 1;
+        } else if (action === "unpublish") {
+          if (setPostStatus(id, "draft")) count += 1;
+        } else if (action === "trash") {
+          if (movePostToTrash(id)) count += 1;
+        } else if (action === "restore") {
+          if (restorePostFromTrash(id)) count += 1;
+        } else if (post.status === "trashed") {
+          deletePostPermanently(id);
+          count += 1;
+        }
       }
-    }
+    });
 
     return NextResponse.json({ ok: true, count });
   } catch (error) {

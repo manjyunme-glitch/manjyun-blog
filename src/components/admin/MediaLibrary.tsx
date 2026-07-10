@@ -38,6 +38,7 @@ export function MediaLibrary({ media }: { media: MediaRecord[] }) {
             ref={fileInputRef}
             className="visually-hidden"
             type="file"
+            accept="image/jpeg,image/png,image/gif,image/webp,image/avif,image/x-icon,audio/mpeg,audio/wav,audio/ogg,audio/flac,audio/mp4,application/pdf"
             onChange={(event) => {
               const file = event.target.files?.[0];
               if (file) upload(file);
@@ -46,7 +47,7 @@ export function MediaLibrary({ media }: { media: MediaRecord[] }) {
           />
           <button className="upload-control" type="button" onClick={() => fileInputRef.current?.click()}>
             <span>选择媒体文件</span>
-            <small>支持图片、音频和附件，保存到 uploads volume</small>
+            <small>支持常用图片、音频和 PDF；SVG 会被拒绝</small>
           </button>
         </div>
         <p className={message.includes("失败") ? "error-text" : "success-text"}>

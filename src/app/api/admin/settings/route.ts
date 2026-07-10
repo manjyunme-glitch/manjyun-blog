@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireAdminForApi } from "@/lib/auth/session";
-import { replaceNavLinks, updateSiteSettings } from "@/lib/db/queries";
-import type { NavLink, SiteSettings } from "@/types/blog";
+import { updateSiteConfiguration } from "@/lib/db/queries";
+import type { HomeModule, NavLink, SiteSettings } from "@/types/blog";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -29,11 +29,23 @@ export async function PUT(request: Request) {
 
   const body = (await request.json()) as {
     settings?: Partial<SiteSettings>;
+    modules?: HomeModule[];
     mainLinks?: unknown;
     frequentLinks?: unknown;
   };
-  updateSiteSettings(body.settings ?? {});
-  replaceNavLinks("main", cleanLinks(body.mainLinks));
-  replaceNavLinks("frequent", cleanLinks(body.frequentLinks));
+  const modules = Array.isArray(body.modules)
+    ? body.modules.map((module) => ({
+        id: String(module.id),
+        enabled: Boolean(module.enabled),
+        sortOrder: Number(module.sortOrder) || 0,
+        config: module.config ?? {}
+      }))
+    : [];
+  updateSiteConfiguration({
+    settings: body.settings ?? {},
+    modules,
+    mainLinks: cleanLinks(body.mainLinks),
+    frequentLinks: cleanLinks(body.frequentLinks)
+  });
   return NextResponse.json({ ok: true });
 }

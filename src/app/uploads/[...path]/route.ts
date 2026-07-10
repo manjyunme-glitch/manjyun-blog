@@ -13,7 +13,6 @@ const mimeMap: Record<string, string> = {
   ".gif": "image/gif",
   ".webp": "image/webp",
   ".avif": "image/avif",
-  ".svg": "image/svg+xml",
   ".mp3": "audio/mpeg",
   ".wav": "audio/wav",
   ".ogg": "audio/ogg",
@@ -32,10 +31,18 @@ export async function GET(
   try {
     const file = await fs.readFile(filePath);
     const ext = path.extname(filePath).toLowerCase();
+    const mime = mimeMap[ext] ?? "application/octet-stream";
+    const disposition =
+      mime.startsWith("image/") || mime.startsWith("audio/") || mime === "application/pdf"
+        ? "inline"
+        : "attachment";
+    const filename = encodeURIComponent(path.basename(filePath));
     return new NextResponse(file, {
       headers: {
-        "Content-Type": mimeMap[ext] ?? "application/octet-stream",
-        "Cache-Control": "public, max-age=31536000, immutable"
+        "Content-Type": mime,
+        "Content-Disposition": `${disposition}; filename*=UTF-8''${filename}`,
+        "Cache-Control": "public, max-age=31536000, immutable",
+        "X-Content-Type-Options": "nosniff"
       }
     });
   } catch {

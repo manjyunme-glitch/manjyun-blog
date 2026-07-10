@@ -45,8 +45,8 @@ services:
       https_proxy: ${STACK_HTTPS_PROXY:-}
       no_proxy: ${STACK_NO_PROXY:-}
     volumes:
-      - ${STACK_BASE_DIR}/data:/app/data
-      - ${STACK_BASE_DIR}/uploads:/app/uploads
+      - ${STACK_BASE_DIR:-.}/data:/app/data
+      - ${STACK_BASE_DIR:-.}/uploads:/app/uploads
     healthcheck:
       test:
         - CMD-SHELL

@@ -2,23 +2,18 @@ import fs from "node:fs";
 import path from "node:path";
 
 export function getDataDir() {
-  return path.resolve(
-    process.env.DATA_DIR ??
-      path.join(/*turbopackIgnore: true*/ process.cwd(), "data")
-  );
+  const configured = process.env.DATA_DIR ?? path.join(process.cwd(), "data");
+  return path.resolve(/* turbopackIgnore: true */ configured);
 }
 
 export function getDatabasePath() {
-  return path.resolve(
-    process.env.DATABASE_PATH ?? path.join(getDataDir(), "manjyun.sqlite")
-  );
+  const configured = process.env.DATABASE_PATH ?? path.join(getDataDir(), "manjyun.sqlite");
+  return path.resolve(/* turbopackIgnore: true */ configured);
 }
 
 export function getUploadsDir() {
-  return path.resolve(
-    process.env.UPLOADS_DIR ??
-      path.join(/*turbopackIgnore: true*/ process.cwd(), "uploads")
-  );
+  const configured = process.env.UPLOADS_DIR ?? path.join(process.cwd(), "uploads");
+  return path.resolve(/* turbopackIgnore: true */ configured);
 }
 
 export function ensureDataDir() {

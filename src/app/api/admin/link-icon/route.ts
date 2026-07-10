@@ -6,6 +6,7 @@ import path from "node:path";
 import tls from "node:tls";
 import { NextResponse } from "next/server";
 import { requireAdminForApi } from "@/lib/auth/session";
+import { validateMediaFile } from "@/lib/media/file-validation";
 import { proxyForUrl } from "@/lib/net/proxy";
 import { tunneledHttpsRequestOptions } from "@/lib/net/tunnel";
 import { ensureUploadsDir, getUploadsDir } from "@/lib/paths";
@@ -22,7 +23,7 @@ class TimeoutError extends Error {
 
 const iconMaxBytes = 1024 * 1024;
 const localIconDir = "link-icons";
-const iconExtensions = [".ico", ".png", ".svg", ".webp", ".gif", ".jpg", ".jpeg", ".avif"];
+const iconExtensions = [".ico", ".png", ".webp", ".gif", ".jpg", ".jpeg", ".avif"];
 
 type FetchResult = {
   ok: boolean;
@@ -277,30 +278,6 @@ async function fetchUrl(
   return result;
 }
 
-function iconExtFromMime(mime: string) {
-  const normalized = mime.split(";")[0].trim().toLowerCase();
-  const extByMime: Record<string, string> = {
-    "image/x-icon": ".ico",
-    "image/vnd.microsoft.icon": ".ico",
-    "image/png": ".png",
-    "image/svg+xml": ".svg",
-    "image/webp": ".webp",
-    "image/gif": ".gif",
-    "image/jpeg": ".jpg",
-    "image/avif": ".avif"
-  };
-  return extByMime[normalized] ?? null;
-}
-
-function iconExtFromUrl(input: string) {
-  try {
-    const ext = path.extname(new URL(input).pathname).toLowerCase();
-    return iconExtensions.includes(ext) ? ext : null;
-  } catch {
-    return null;
-  }
-}
-
 function iconCacheHash(iconUrl: string) {
   return crypto.createHash("sha256").update(iconUrl).digest("hex").slice(0, 28);
 }
@@ -326,24 +303,18 @@ async function readCachedIcon(iconUrl: string) {
   return "";
 }
 
-function isImageResponse(response: FetchResult, iconUrl: string) {
-  const mime = response.headers.get("content-type") ?? "";
-  if (mime.toLowerCase().startsWith("image/")) return true;
-  return Boolean(iconExtFromUrl(response.url || iconUrl));
-}
-
 async function cacheRemoteIcon(iconUrl: string, timeoutMs = 5200) {
   const cached = await readCachedIcon(iconUrl);
   if (cached) return cached;
 
   const response = await fetchUrl(iconUrl, {
-    accept: "image/avif,image/webp,image/svg+xml,image/png,image/*,*/*;q=0.8",
+    accept: "image/avif,image/webp,image/png,image/jpeg,image/gif,image/x-icon,*/*;q=0.5",
     timeoutMs,
     maxBytes: iconMaxBytes
   });
 
-  if (!response.ok || !isImageResponse(response, iconUrl)) {
-    throw new Error("Icon response is not an image.");
+  if (!response.ok) {
+    throw new Error("Icon request failed.");
   }
 
   const contentLength = Number(response.headers.get("content-length") ?? 0);
@@ -356,11 +327,11 @@ async function cacheRemoteIcon(iconUrl: string, timeoutMs = 5200) {
     throw new Error("Icon is too large.");
   }
 
-  const ext =
-    iconExtFromMime(response.headers.get("content-type") ?? "") ??
-    iconExtFromUrl(response.url || iconUrl) ??
-    ".ico";
-  const target = localIconPath(iconUrl, ext);
+  const validated = validateMediaFile(buffer, { imageOnly: true });
+  if (!validated) {
+    throw new Error("Icon response is not a supported raster image.");
+  }
+  const target = localIconPath(iconUrl, validated.extension);
   ensureUploadsDir();
   await fs.mkdir(path.dirname(target.fullPath), { recursive: true });
   try {

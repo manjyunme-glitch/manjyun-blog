@@ -5,6 +5,8 @@ import { ensureSchema } from "@/lib/db/schema";
 type GlobalDb = typeof globalThis & {
   __manjyunDb?: DatabaseSync;
   __manjyunSchemaReady?: boolean;
+  __manjyunTransactionDepth?: number;
+  __manjyunSavepointId?: number;
 };
 
 function openDatabase() {
@@ -48,6 +50,42 @@ export function run(sql: string, params: unknown[] = []) {
 
 export function exec(sql: string) {
   getDb().exec(sql);
+}
+
+export function transaction<T>(operation: () => T): T {
+  const db = getDb();
+  const globalDb = globalThis as GlobalDb;
+  const depth = globalDb.__manjyunTransactionDepth ?? 0;
+  const savepointId = (globalDb.__manjyunSavepointId ?? 0) + 1;
+  const savepoint = `manjyun_sp_${savepointId}`;
+
+  globalDb.__manjyunSavepointId = savepointId;
+  if (depth === 0) {
+    db.exec("BEGIN IMMEDIATE");
+  } else {
+    db.exec(`SAVEPOINT ${savepoint}`);
+  }
+  globalDb.__manjyunTransactionDepth = depth + 1;
+
+  try {
+    const result = operation();
+    if (depth === 0) {
+      db.exec("COMMIT");
+    } else {
+      db.exec(`RELEASE SAVEPOINT ${savepoint}`);
+    }
+    return result;
+  } catch (error) {
+    if (depth === 0) {
+      db.exec("ROLLBACK");
+    } else {
+      db.exec(`ROLLBACK TO SAVEPOINT ${savepoint}`);
+      db.exec(`RELEASE SAVEPOINT ${savepoint}`);
+    }
+    throw error;
+  } finally {
+    globalDb.__manjyunTransactionDepth = depth;
+  }
 }
 
 function toPlainRow(row: unknown) {

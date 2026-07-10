@@ -20,6 +20,9 @@
     "react-dom": "^19.2.7",
     "sanitize-html": "^2.17.0"
   },
+  "overrides": {
+    "postcss": "^8.5.10"
+  },
   "devDependencies": {
     "@playwright/test": "^1.61.1",
     "@types/node": "^24.10.2",

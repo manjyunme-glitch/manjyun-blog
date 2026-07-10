@@ -1,13 +1,23 @@
 "use server";
 
 import { redirect } from "next/navigation";
+import { headers } from "next/headers";
 import {
   createAdminUser,
   getAdminByUsername,
   isSetupComplete
 } from "@/lib/db/queries";
 import { hashPassword, verifyPassword } from "@/lib/auth/password";
+import {
+  clearLoginFailures,
+  clientIpFromHeaders,
+  loginRetryAfterSeconds,
+  recordLoginFailure
+} from "@/lib/auth/login-rate-limit";
 import { clearSession, setSession } from "@/lib/auth/session";
+
+const dummyPasswordHash =
+  "scrypt$manjyun-login-dummy-salt$2FTEXpgQdCXahV6WzRA-S6Hi2obcM8fS3dLm89fJCe-5W68ljjUsNjflizpx7MlLCbRkl9wRw0aNYFybP9YYyw";
 
 function cleanRedirectError(error: unknown) {
   return encodeURIComponent(
@@ -43,11 +53,23 @@ export async function loginAction(formData: FormData) {
 
   const username = String(formData.get("username") ?? "").trim();
   const password = String(formData.get("password") ?? "");
+  const requestHeaders = await headers();
+  const clientIp = clientIpFromHeaders(requestHeaders);
+  if (loginRetryAfterSeconds(username, clientIp) > 0) {
+    redirect("/admin/login?error=登录尝试过多，请稍后再试");
+  }
+
   const admin = getAdminByUsername(username);
-  if (!admin || !(await verifyPassword(password, admin.passwordHash))) {
+  const passwordMatches = await verifyPassword(
+    password,
+    admin?.passwordHash ?? dummyPasswordHash
+  );
+  if (!admin || !passwordMatches) {
+    recordLoginFailure(username, clientIp);
     redirect("/admin/login?error=用户名或密码错误");
   }
 
+  clearLoginFailures(username, clientIp);
   await setSession(admin.id);
   redirect("/admin");
 }
