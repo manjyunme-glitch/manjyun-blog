@@ -20,7 +20,7 @@ export default async function LoginPage({
       <form className="auth-card form-grid" action={loginAction}>
         <div>
           <h1 className="admin-title">登录写作台</h1>
-          <p className="admin-subtitle">管理文章、媒体、主题和首页模块。</p>
+          <p className="admin-subtitle">管理内容、媒体、主题和首页模块。</p>
         </div>
         {error ? <p className="error-text">{decodeURIComponent(error)}</p> : null}
         <div className="field">

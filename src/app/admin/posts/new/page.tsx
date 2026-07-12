@@ -13,7 +13,7 @@ export default async function NewPostPage() {
       subtitle="Markdown 是正文唯一源格式。"
       breadcrumbs={[
         { label: "概览", href: "/admin" },
-        { label: "文章", href: "/admin/posts" },
+        { label: "内容", href: "/admin/posts" },
         { label: "新建内容" }
       ]}
       activeNav="/admin/posts/new"

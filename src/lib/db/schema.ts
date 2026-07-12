@@ -11,8 +11,8 @@ const defaultSettings = {
   stackItems:
     "Debian,Docker,Nginx,Cloudflare,Python,Mihomo,Xray,Hysteria2,WireGuard,ZFS",
   uptimeStart: "2026-03-20",
-  blogTitle: "All Posts",
-  blogDescription: "按时间倒序浏览博客文章。",
+  blogTitle: "随笔",
+  blogDescription: "按时间倒序浏览随笔。",
   projectsTitle: "Projects",
   projectsDescription: "记录已经完成、正在折腾、或者值得复盘的项目。",
   aboutTitle: "About",
@@ -193,6 +193,18 @@ export function ensureSchema(db: DatabaseSync) {
   for (const [key, value] of Object.entries(defaultSettings)) {
     settingStmt.run(key, value);
   }
+
+  // Rename only untouched legacy defaults. Custom titles/descriptions are user
+  // content and must never be overwritten during an application upgrade.
+  const legacyDefaultStmt = db.prepare(
+    "UPDATE settings SET value = ? WHERE key = ? AND value = ?"
+  );
+  legacyDefaultStmt.run("随笔", "blogTitle", "All Posts");
+  legacyDefaultStmt.run(
+    "按时间倒序浏览随笔。",
+    "blogDescription",
+    "按时间倒序浏览博客文章。"
+  );
 
   const moduleStmt = db.prepare(
     "INSERT OR IGNORE INTO home_modules (id, enabled, sort_order, config) VALUES (?, ?, ?, ?)"

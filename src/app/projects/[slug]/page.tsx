@@ -1,38 +1,53 @@
+import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { getTheme } from "@/themes";
+import { StructuredData } from "@/components/seo/StructuredData";
+import { ThemeHost } from "@/components/theme/ThemeHost";
 import {
   getAdjacentPosts,
   getNavLinks,
   getPostBySlug,
   getSiteSettings
 } from "@/lib/db/queries";
-import { renderMarkdown } from "@/lib/content/markdown";
-import { readingTime } from "@/lib/content/reading-time";
+import {
+  createEntryMetadata,
+  createEntryStructuredData
+} from "@/lib/seo/metadata";
+import { presentEntry } from "@/lib/themes/presenter";
 
 export const dynamic = "force-dynamic";
 
+type ProjectPageProps = {
+  params: Promise<{ slug: string }>;
+};
+
+export async function generateMetadata({ params }: ProjectPageProps): Promise<Metadata> {
+  const { slug } = await params;
+  const post = getPostBySlug("project", decodeURIComponent(slug));
+  if (!post) return { title: "项目不存在", robots: { index: false, follow: false } };
+  return createEntryMetadata(getSiteSettings(), post);
+}
+
 export default async function ProjectPage({
   params
-}: {
-  params: Promise<{ slug: string }>;
-}) {
+}: ProjectPageProps) {
   const { slug } = await params;
   const post = getPostBySlug("project", decodeURIComponent(slug));
   if (!post) notFound();
 
   const settings = getSiteSettings();
-  const theme = getTheme(settings.activeTheme);
   const adjacent = getAdjacentPosts(post);
+  const view = presentEntry({
+    settings,
+    navLinks: getNavLinks("main"),
+    post,
+    previous: adjacent.prev,
+    next: adjacent.next
+  });
 
   return (
-    <theme.slots.Post
-      settings={settings}
-      navLinks={getNavLinks("main")}
-      post={post}
-      rendered={renderMarkdown(post.markdown)}
-      readingTime={readingTime(post.markdown)}
-      previous={adjacent.prev}
-      next={adjacent.next}
-    />
+    <>
+      <StructuredData data={createEntryStructuredData(settings, post)} />
+      <ThemeHost themeId={settings.activeTheme} view={view} />
+    </>
   );
 }

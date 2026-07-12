@@ -1,7 +1,11 @@
 import { AdminFrame } from "@/components/admin/AdminFrame";
 import { ThemeManager } from "@/components/admin/ThemeManager";
 import { requireAdmin } from "@/lib/auth/session";
-import { getSiteSettings, listThemeInstalls } from "@/lib/db/queries";
+import {
+  getPreviousTheme,
+  getSiteSettings,
+  listThemeInstalls
+} from "@/lib/db/queries";
 import { getThemes } from "@/themes";
 
 export const dynamic = "force-dynamic";
@@ -10,6 +14,10 @@ export default async function AdminThemesPage() {
   await requireAdmin();
   const settings = getSiteSettings();
   const themes = getThemes();
+  const previousThemeId = getPreviousTheme();
+  const previousTheme = themes.find(
+    (theme) => theme.meta.id === previousThemeId && theme.meta.id !== settings.activeTheme
+  );
 
   return (
     <AdminFrame
@@ -23,7 +31,15 @@ export default async function AdminThemesPage() {
     >
       <ThemeManager
         activeTheme={settings.activeTheme}
-        themes={themes.map((theme) => ({ ...theme.meta, tokens: theme.tokens }))}
+        previousTheme={previousTheme ? {
+          id: previousTheme.meta.id,
+          name: previousTheme.meta.name
+        } : null}
+        themes={themes.map((theme) => ({
+          ...theme.meta,
+          apiVersion: theme.apiVersion,
+          capabilities: theme.capabilities
+        }))}
         imports={listThemeInstalls()}
       />
     </AdminFrame>

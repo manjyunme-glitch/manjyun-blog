@@ -27,6 +27,22 @@ docker compose up --build
 - `data/`：SQLite 数据库和本地认证 secret
 - `uploads/`：上传的图片、音频和附件
 
+## 升级现有部署
+
+现有 `data/` 与 `uploads/` 可以直接用于新版。内容类型的数据库 ID 仍是
+`post`、`project`、`page`；“随笔”只是 `post` 的新显示名称，旧链接和数据不需要转换。
+启动时会自动执行向后兼容的 schema 迁移，并且只会把仍等于旧默认值的
+`All Posts / 按时间倒序浏览博客文章。` 更新为“随笔”文案，不会覆盖自定义设置。
+
+升级前请先停止应用容器，再完整备份 `data/` 和 `uploads/` 两个目录。SQLite 使用
+WAL 模式时，尚未 checkpoint 的内容可能仍在 `manjyun.sqlite-wal` 中；不要在容器运行时
+只复制 `manjyun.sqlite`。同时保留 `data/auth-secret`，如果环境变量中显式设置过
+`AUTH_SECRET`，新版也必须继续使用相同值。
+
+Windows Docker 主机可将 `STACK_BASE_DIR` 写成父目录的正斜杠路径，例如
+`E:/manjyun-blog`，对应结构应为 `E:/manjyun-blog/data` 与
+`E:/manjyun-blog/uploads`。Linux / NAS 部署必须改用 Docker 主机实际可访问的路径。
+
 ## NAS / Portainer 部署
 
 本仓库可以直接作为 Portainer Git Stack 部署。运行数据放在 NAS 本地目录，不跟随 GitHub 更新覆盖。
@@ -83,4 +99,6 @@ mkdir -p /share/DockerData/manjyun-blog/uploads
 
 ## 主题接口
 
-默认主题是 `ManJyun Console`，位于 `src/themes/manjyun-console`。主题通过 `theme.meta`、`theme.tokens` 和 `theme.slots` 注册，后续可以新增主题目录并加入 `src/themes/index.ts`。
+内置主题包括终端风格的 `ManJyun Console`（`src/themes/manjyun-console`）和明亮编辑设计的 `Paper Atlas`（`src/themes/paper-atlas`）。公开路由先由 `src/lib/themes/presenter.ts` 将数据库记录转换为稳定 ViewModel，再由 `ThemeHost` 分发到主题；主题不能直接读取数据库类型、格式化业务数据或拼接内容 URL。
+
+主题定义必须声明 `apiVersion`、`coreCompatibility`、`capabilities`、`tokens`，并实现 `Home`、`Collection`、`Entry`、`Page`、`NotFound` 五个槽位。类型契约与当前核心版本位于 `src/themes/types.ts`；新增受信任代码主题后，将其加入 `src/themes/index.ts` 并通过主题契约测试。后台主题页只能激活这些已编译且兼容的主题，并提供真实首页预览与单步回退；JSON 上传仅执行 manifest 兼容性审查，不会安装或执行上传的代码。

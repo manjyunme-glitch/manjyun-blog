@@ -11,18 +11,51 @@ test("post publishing preserves first publish time and safe revision history", a
   process.env.DATABASE_PATH = path.join(root, "manjyun.sqlite");
 
   const {
+    activateTheme,
+    contentStatusCounts,
+    contentTypeCounts,
+    dashboardStats,
     getAdjacentPosts,
     getPostById,
+    getPreviousTheme,
     getSiteSettings,
     getTagBySlug,
+    listAdminPostSummaries,
     listPosts,
     listPostRevisions,
     replaceNavLinks,
     restorePostRevision,
+    rollbackTheme,
     savePost,
     setPostStatus,
     updateSiteConfiguration
   } = await import("@/lib/db/queries");
+
+  assert.equal(getSiteSettings().activeTheme, "manjyun-console");
+  assert.equal(getPreviousTheme(), null);
+  assert.equal("previousTheme" in getSiteSettings(), false);
+  assert.equal(rollbackTheme(), null);
+
+  assert.deepEqual(activateTheme("paper-atlas"), {
+    activeTheme: "paper-atlas",
+    previousTheme: "manjyun-console"
+  });
+  assert.deepEqual(activateTheme("paper-atlas"), {
+    activeTheme: "paper-atlas",
+    previousTheme: "manjyun-console"
+  });
+  assert.deepEqual(rollbackTheme(), {
+    activeTheme: "manjyun-console",
+    previousTheme: "paper-atlas"
+  });
+  assert.deepEqual(rollbackTheme(), {
+    activeTheme: "paper-atlas",
+    previousTheme: "manjyun-console"
+  });
+  assert.deepEqual(activateTheme("manjyun-console"), {
+    activeTheme: "manjyun-console",
+    previousTheme: "paper-atlas"
+  });
 
   const firstAutoSlug = savePost({
     type: "post",
@@ -54,6 +87,138 @@ test("post publishing preserves first publish time and safe revision history", a
     tags: []
   });
   assert.equal(projectAutoSlug.slug, "projects-001");
+
+  const legacyPage = savePost({
+    type: "page",
+    title: "Legacy System Page",
+    markdown: "legacy page body",
+    status: "draft",
+    tags: []
+  });
+  assert.equal(legacyPage.type, "page");
+  assert.equal(legacyPage.slug, "pages-001");
+  assert.deepEqual(contentStatusCounts(), {
+    all: 3,
+    published: 1,
+    draft: 2,
+    trashed: 0
+  });
+  assert.deepEqual(contentStatusCounts("post"), {
+    all: 2,
+    published: 1,
+    draft: 1,
+    trashed: 0
+  });
+  assert.deepEqual(contentStatusCounts("project"), {
+    all: 1,
+    published: 0,
+    draft: 1,
+    trashed: 0
+  });
+  assert.deepEqual(contentTypeCounts(), { all: 3, post: 2, project: 1 });
+  assert.deepEqual(contentTypeCounts("draft"), { all: 2, post: 1, project: 1 });
+  assert.deepEqual(
+    {
+      published: dashboardStats().published,
+      drafts: dashboardStats().drafts,
+      trashed: dashboardStats().trashed
+    },
+    { published: 1, drafts: 2, trashed: 0 }
+  );
+
+  const summaryTitleMatch = savePost({
+    type: "post",
+    title: "PagedSearch Alpha",
+    markdown: "ordinary summary body",
+    excerpt: "first summary",
+    status: "draft",
+    tags: ["ZuluBatch", "AlphaBatch"]
+  });
+  const summaryBodyMatch = savePost({
+    type: "project",
+    title: "Pagination Beta",
+    markdown: "PagedSearch appears only in this body",
+    status: "draft",
+    tags: ["BetaBatch"]
+  });
+  const summaryTagMatch = savePost({
+    type: "post",
+    title: "Pagination Gamma",
+    markdown: "ordinary tagged body",
+    status: "published",
+    tags: ["PagedSearch"]
+  });
+  const { run: runDb } = await import("@/lib/db/client");
+  runDb("UPDATE posts SET updated_at = ? WHERE id = ?", [
+    "2026-03-03T00:00:00.000Z",
+    summaryTitleMatch.id
+  ]);
+  runDb("UPDATE posts SET updated_at = ? WHERE id = ?", [
+    "2026-03-02T00:00:00.000Z",
+    summaryBodyMatch.id
+  ]);
+  runDb("UPDATE posts SET updated_at = ? WHERE id = ?", [
+    "2026-03-01T00:00:00.000Z",
+    summaryTagMatch.id
+  ]);
+
+  const firstSummaryPage = listAdminPostSummaries({ q: "PagedSearch", limit: 2 });
+  assert.equal(firstSummaryPage.total, 3);
+  assert.equal(firstSummaryPage.offset, 0);
+  assert.deepEqual(
+    firstSummaryPage.posts.map((post) => post.id),
+    [summaryTitleMatch.id, summaryBodyMatch.id]
+  );
+  assert.deepEqual(
+    firstSummaryPage.posts[0]?.tags.map((tag) => tag.name),
+    ["AlphaBatch", "ZuluBatch"]
+  );
+  assert.equal("markdown" in firstSummaryPage.posts[0]!, false);
+
+  const secondSummaryPage = listAdminPostSummaries({
+    q: "PagedSearch",
+    limit: 2,
+    offset: 2
+  });
+  assert.deepEqual(secondSummaryPage.posts.map((post) => post.id), [summaryTagMatch.id]);
+  assert.deepEqual(secondSummaryPage.posts[0]?.tags.map((tag) => tag.name), ["PagedSearch"]);
+
+  const clampedSummaryPage = listAdminPostSummaries({
+    q: "PagedSearch",
+    limit: 2,
+    offset: 200
+  });
+  assert.equal(clampedSummaryPage.offset, 2);
+  assert.deepEqual(clampedSummaryPage.posts.map((post) => post.id), [summaryTagMatch.id]);
+
+  const combinedSummaryFilter = listAdminPostSummaries({
+    type: "post",
+    status: "draft",
+    q: "PagedSearch",
+    limit: 20
+  });
+  assert.equal(combinedSummaryFilter.total, 1);
+  assert.deepEqual(combinedSummaryFilter.posts.map((post) => post.id), [summaryTitleMatch.id]);
+  assert.deepEqual(contentStatusCounts(undefined, "PagedSearch"), {
+    all: 3,
+    published: 1,
+    draft: 2,
+    trashed: 0
+  });
+  assert.deepEqual(contentTypeCounts(undefined, "PagedSearch"), {
+    all: 3,
+    post: 2,
+    project: 1
+  });
+  assert.equal(
+    listAdminPostSummaries({
+      type: "project",
+      status: "draft",
+      q: "%",
+      limit: 20
+    }).total,
+    0
+  );
 
   const published = savePost({
     type: "post",

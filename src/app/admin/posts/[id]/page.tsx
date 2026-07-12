@@ -4,14 +4,9 @@ import { AdminFrame } from "@/components/admin/AdminFrame";
 import { AdminEditor } from "@/components/admin/AdminEditor";
 import { requireAdmin } from "@/lib/auth/session";
 import { getPostById, listPostRevisions } from "@/lib/db/queries";
+import { CONTENT_TYPE_DEFINITIONS, type AdminContentType } from "@/lib/content/content-types";
 
 export const dynamic = "force-dynamic";
-
-const typeLabels = {
-  post: "文章",
-  page: "页面",
-  project: "项目"
-} as const;
 
 const statusLabels = {
   published: "已发布",
@@ -19,8 +14,11 @@ const statusLabels = {
   trashed: "回收站"
 } as const;
 
-function statusHref(status: keyof typeof statusLabels) {
-  return `/admin/posts?status=${status}`;
+function statusHref(status: keyof typeof statusLabels, type?: AdminContentType) {
+  const params = new URLSearchParams();
+  if (type) params.set("type", type);
+  params.set("status", status);
+  return `/admin/posts?${params.toString()}`;
 }
 
 export default async function EditPostPage({
@@ -33,16 +31,16 @@ export default async function EditPostPage({
   const post = getPostById(Number(id));
   if (!post) notFound();
   const revisions = listPostRevisions(post.id);
-  const returnHref = statusHref(post.status);
+  const returnHref = statusHref(post.status, post.type === "page" ? undefined : post.type);
   const returnLabel = `返回${statusLabels[post.status]}列表`;
 
   return (
     <AdminFrame
       title={post.title}
-      subtitle={`${typeLabels[post.type]} / ${statusLabels[post.status]}`}
+      subtitle={`${CONTENT_TYPE_DEFINITIONS[post.type].label} / ${statusLabels[post.status]}`}
       breadcrumbs={[
         { label: "概览", href: "/admin" },
-        { label: "文章", href: "/admin/posts" },
+        { label: "内容", href: "/admin/posts" },
         { label: statusLabels[post.status], href: returnHref },
         { label: post.title }
       ]}
@@ -50,7 +48,7 @@ export default async function EditPostPage({
       action={
         <div className="btn-row">
           <Link className="btn" href={returnHref}>{returnLabel}</Link>
-          <Link className="btn ghost" href="/admin/posts">全部文章</Link>
+          <Link className="btn ghost" href="/admin/posts">全部内容</Link>
         </div>
       }
     >

@@ -12,7 +12,7 @@ export function slugify(input: string, fallback = "post") {
 
 export function splitCommaList(input: string | null | undefined) {
   return (input ?? "")
-    .split(",")
+    .split(/[,，\n]+/)
     .map((item) => item.trim())
     .filter(Boolean);
 }
