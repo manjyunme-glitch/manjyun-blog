@@ -4,9 +4,18 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { formatDate } from "@/lib/content/format";
-import type { PostRecord, PostStatus } from "@/types/blog";
+import {
+  adminContentListHref,
+  type AdminContentStatusFilter,
+  type AdminContentTypeFilter
+} from "@/lib/admin/content-list";
+import {
+  ADMIN_CONTENT_TYPE_DEFINITIONS,
+  CONTENT_TYPE_DEFINITIONS,
+  contentHref
+} from "@/lib/content/content-types";
+import type { PostStatus, PostSummary } from "@/types/blog";
 
-type ContentFilter = "all" | PostStatus;
 type BulkAction = "publish" | "unpublish" | "trash" | "restore" | "delete";
 
 type StatusCounts = {
@@ -16,7 +25,13 @@ type StatusCounts = {
   trashed: number;
 };
 
-const filters: Array<{ id: ContentFilter; label: string; countKey: keyof StatusCounts }> = [
+type TypeCounts = {
+  all: number;
+  post: number;
+  project: number;
+};
+
+const statusFilters: Array<{ id: AdminContentStatusFilter; label: string; countKey: keyof StatusCounts }> = [
   { id: "all", label: "全部", countKey: "all" },
   { id: "published", label: "已发布", countKey: "published" },
   { id: "draft", label: "草稿", countKey: "draft" },
@@ -29,12 +44,6 @@ const statusLabels: Record<PostStatus, string> = {
   trashed: "回收站"
 };
 
-const typeLabels = {
-  post: "文章",
-  project: "项目",
-  page: "页面"
-} as const;
-
 const normalBulkActions: Array<{ action: BulkAction; label: string; danger?: boolean }> = [
   { action: "publish", label: "发布" },
   { action: "unpublish", label: "取消发布" },
@@ -46,18 +55,35 @@ const trashBulkActions: Array<{ action: BulkAction; label: string; danger?: bool
   { action: "delete", label: "永久删除", danger: true }
 ];
 
-function filterHref(filter: ContentFilter) {
-  return filter === "all" ? "/admin/posts" : `/admin/posts?status=${filter}`;
-}
+const typeFilters: Array<{ id: AdminContentTypeFilter; label: string; countKey: keyof TypeCounts }> = [
+  { id: "all", label: "全部", countKey: "all" },
+  ...ADMIN_CONTENT_TYPE_DEFINITIONS.map((definition) => ({
+    id: definition.id,
+    label: definition.label,
+    countKey: definition.id
+  }))
+];
 
 export function AdminContentTable({
   posts,
-  counts,
-  currentFilter
+  statusCounts,
+  typeCounts,
+  currentStatus,
+  currentType,
+  currentQuery,
+  currentPage,
+  totalPages,
+  total
 }: {
-  posts: PostRecord[];
-  counts: StatusCounts;
-  currentFilter: ContentFilter;
+  posts: PostSummary[];
+  statusCounts: StatusCounts;
+  typeCounts: TypeCounts;
+  currentStatus: AdminContentStatusFilter;
+  currentType: AdminContentTypeFilter;
+  currentQuery: string;
+  currentPage: number;
+  totalPages: number;
+  total: number;
 }) {
   const router = useRouter();
   const [pendingId, setPendingId] = useState<number | null>(null);
@@ -67,11 +93,11 @@ export function AdminContentTable({
   const visibleKey = visibleIds.join(",");
   const allVisibleSelected =
     visibleIds.length > 0 && visibleIds.every((id) => selectedIds.has(id));
-  const bulkActions = currentFilter === "trashed" ? trashBulkActions : normalBulkActions;
+  const bulkActions = currentStatus === "trashed" ? trashBulkActions : normalBulkActions;
 
   useEffect(() => {
     setSelectedIds(new Set());
-  }, [currentFilter, visibleKey]);
+  }, [currentPage, currentQuery, currentStatus, currentType, visibleKey]);
 
   function toggleSelected(id: number, checked: boolean) {
     setSelectedIds((current) => {
@@ -94,7 +120,7 @@ export function AdminContentTable({
       action === "trash"
         ? "确定移到回收站？公开页面会立即隐藏。"
         : action === "unpublish"
-          ? "确定取消发布？文章会回到草稿。"
+          ? "确定取消发布？内容会回到草稿。"
           : "";
     if (confirmMessage && !window.confirm(confirmMessage)) return;
 
@@ -168,20 +194,64 @@ export function AdminContentTable({
 
   return (
     <section className="content-workbench">
+      <form className="content-toolbar" action="/admin/posts" method="get" role="search">
+        {currentType !== "all" ? <input type="hidden" name="type" value={currentType} /> : null}
+        {currentStatus !== "all" ? <input type="hidden" name="status" value={currentStatus} /> : null}
+        <input
+          key={currentQuery}
+          className="input"
+          type="search"
+          name="q"
+          defaultValue={currentQuery}
+          aria-label="搜索内容"
+          placeholder="搜索标题、Slug、摘要、正文或标签"
+        />
+        <div className="btn-row">
+          <button className="btn primary" type="submit">搜索</button>
+          {currentQuery ? (
+            <Link
+              className="btn ghost"
+              href={adminContentListHref({ type: currentType, status: currentStatus })}
+            >
+              清空
+            </Link>
+          ) : null}
+        </div>
+      </form>
       <div className="content-toolbar">
         <div className="segmented" aria-label="内容状态筛选">
-          {filters.map((filter) => (
+          {statusFilters.map((filter) => (
             <Link
               key={filter.id}
-              className={`seg-btn ${currentFilter === filter.id ? "is-active" : ""}`}
-              href={filterHref(filter.id)}
+              className={`seg-btn ${currentStatus === filter.id ? "is-active" : ""}`}
+              href={adminContentListHref({
+                type: currentType,
+                status: filter.id,
+                q: currentQuery
+              })}
             >
               {filter.label}
-              <span>{counts[filter.countKey]}</span>
+              <span>{statusCounts[filter.countKey]}</span>
             </Link>
           ))}
         </div>
-        <span className="chip">显示 {posts.length} 项</span>
+        <div className="segmented" aria-label="内容类型筛选">
+          {typeFilters.map((filter) => (
+            <Link
+              key={filter.id}
+              className={`seg-btn ${currentType === filter.id ? "is-active" : ""}`}
+              href={adminContentListHref({
+                type: filter.id,
+                status: currentStatus,
+                q: currentQuery
+              })}
+            >
+              {filter.label}
+              <span>{typeCounts[filter.countKey]}</span>
+            </Link>
+          ))}
+        </div>
+        <span className="chip">本页 {posts.length} 项 / 共 {total} 项</span>
       </div>
 
       <div className={`bulk-bar ${selectedIds.size ? "" : "is-empty"}`}>
@@ -245,7 +315,7 @@ export function AdminContentTable({
                   <span className={`status-pill ${post.status}`}>{statusLabels[post.status]}</span>
                 </td>
                 <td>
-                  <span className="type-pill">{typeLabels[post.type]}</span>
+                  <span className="type-pill">{CONTENT_TYPE_DEFINITIONS[post.type].label}</span>
                 </td>
                 <td>
                   {post.tags?.length ? (
@@ -263,7 +333,7 @@ export function AdminContentTable({
                 <td>{formatDate(post.updatedAt)}</td>
                 <td>
                   <code className="path-code">
-                    /{post.type === "project" ? "projects" : "posts"}/{post.slug}
+                    {contentHref(post.type, post.slug)}
                   </code>
                 </td>
                 <td>
@@ -341,6 +411,39 @@ export function AdminContentTable({
         </table>
         {!posts.length ? <p className="empty-state">当前筛选下没有内容。</p> : null}
       </div>
+      <nav className="content-toolbar" aria-label="内容分页">
+        {currentPage > 1 ? (
+          <Link
+            className="btn"
+            href={adminContentListHref({
+              type: currentType,
+              status: currentStatus,
+              q: currentQuery,
+              page: currentPage - 1
+            })}
+          >
+            上一页
+          </Link>
+        ) : (
+          <span className="btn ghost" aria-disabled="true">上一页</span>
+        )}
+        <span className="chip">第 {currentPage} / {totalPages} 页</span>
+        {currentPage < totalPages ? (
+          <Link
+            className="btn"
+            href={adminContentListHref({
+              type: currentType,
+              status: currentStatus,
+              q: currentQuery,
+              page: currentPage + 1
+            })}
+          >
+            下一页
+          </Link>
+        ) : (
+          <span className="btn ghost" aria-disabled="true">下一页</span>
+        )}
+      </nav>
     </section>
   );
 }

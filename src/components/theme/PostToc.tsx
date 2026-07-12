@@ -14,8 +14,10 @@ function easeOutQuint(progress: number) {
 }
 
 function navOffset() {
-  const nav = document.querySelector<HTMLElement>(".site-nav");
-  if (!nav || getComputedStyle(nav).position !== "fixed") return 22;
+  const nav = document.querySelector<HTMLElement>("[data-site-nav]");
+  if (!nav) return 22;
+  const position = getComputedStyle(nav).position;
+  if (position !== "fixed" && position !== "sticky") return 22;
   return nav.getBoundingClientRect().height + 22;
 }
 
@@ -268,7 +270,6 @@ export function PostToc({ items }: { items: TocItem[] }) {
     <nav
       className={`toc ${visible ? "is-visible" : ""}`}
       aria-label="Article sections"
-      aria-hidden={!visible}
     >
       <div className="toc-title">目录</div>
       <div className="toc-links" ref={listRef}>

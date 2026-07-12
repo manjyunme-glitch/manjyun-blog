@@ -9,16 +9,23 @@ import {
   savePost,
   setPostStatus
 } from "@/lib/db/queries";
+import {
+  canAdminChangeContentType,
+  isContentType
+} from "@/lib/content/content-types";
 import type { PostStatus, PostType } from "@/types/blog";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-function normalizeBody(id: number, body: Record<string, unknown>) {
-  const type = String(body.type ?? "post") as PostType;
+function normalizeBody(id: number, body: Record<string, unknown>, existingType: PostType) {
+  const type = String(body.type ?? existingType);
   const status = String(body.status ?? "draft") as PostStatus;
-  if (!["post", "page", "project"].includes(type)) {
+  if (!isContentType(type)) {
     throw new Error("Invalid content type.");
+  }
+  if (!canAdminChangeContentType(existingType, type)) {
+    throw new Error("This system content type cannot be changed.");
   }
   if (!["draft", "published", "trashed"].includes(status)) {
     throw new Error("Invalid status.");
@@ -47,13 +54,14 @@ export async function PUT(
 
   const { id: rawId } = await params;
   const id = Number(rawId);
-  if (!getPostById(id)) {
+  const existing = getPostById(id);
+  if (!existing) {
     return NextResponse.json({ ok: false, error: "Not found" }, { status: 404 });
   }
 
   try {
     const body = (await request.json()) as Record<string, unknown>;
-    const post = savePost(normalizeBody(id, body));
+    const post = savePost(normalizeBody(id, body, existing.type));
     return NextResponse.json({ ok: true, id: post.id, slug: post.slug });
   } catch (error) {
     return NextResponse.json(

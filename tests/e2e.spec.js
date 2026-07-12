@@ -42,7 +42,7 @@ test("setup admin and publish a post", async ({ page }) => {
 
   await page.goto(`${baseUrl}/posts/${result.body.slug}`);
   await expect(
-    page.locator(".gh-content h1", { hasText: "E2E Test Post" })
+    page.getByRole("heading", { level: 1, name: "E2E Test Post" })
   ).toBeVisible();
 
   const rejectedUpload = await page.evaluate(async () => {
@@ -81,6 +81,41 @@ test("setup admin and publish a post", async ({ page }) => {
   expect(acceptedUpload.status).toBe(200);
   expect(acceptedUpload.body.media.mime).toBe("image/png");
   expect(acceptedUpload.body.media.url).toMatch(/\.png$/);
+
+  await page.goto(`${baseUrl}/`);
+  const originalTheme = await page.locator("[data-theme]").first().getAttribute("data-theme");
+  expect(originalTheme).toBeTruthy();
+
+  await page.goto(`${baseUrl}/admin/themes`);
+  expect(
+    await page.locator('.theme-card iframe[src^="/theme-preview/"]').count()
+  ).toBeGreaterThanOrEqual(2);
+  const availableCard = page.locator(".theme-card").filter({
+    has: page.locator(".status-pill", { hasText: "可用" })
+  }).first();
+  const targetName = await availableCard.getByRole("heading", { level: 2 }).textContent();
+  const previewSrc = await availableCard.locator("iframe").getAttribute("src");
+  const targetTheme = decodeURIComponent(previewSrc?.split("/").pop() || "");
+  expect(targetName).toBeTruthy();
+  expect(targetTheme).toBeTruthy();
+
+  await availableCard.getByRole("button", { name: "激活" }).click();
+  const targetCard = page.locator(".theme-card").filter({
+    has: page.getByRole("heading", { level: 2, name: targetName || "" })
+  });
+  await expect(targetCard.locator(".status-pill")).toHaveText("当前");
+  await page.goto(`${baseUrl}/`);
+  await expect(page.locator(`[data-theme="${targetTheme}"]`)).toBeVisible();
+
+  await page.goto(`${baseUrl}/admin/themes`);
+  await page.getByRole("button", { name: new RegExp(`^回退到`) }).click();
+  await expect(page.locator(".theme-success")).toContainText("已回退到");
+  await page.goto(`${baseUrl}/`);
+  await expect(page.locator(`[data-theme="${originalTheme}"]`)).toBeVisible();
+
+  const missingPreview = await page.goto(`${baseUrl}/theme-preview/%25`);
+  expect(missingPreview?.status()).toBe(404);
+  await expect(page.getByRole("heading", { level: 1, name: "页面不存在" })).toBeVisible();
 
   await page.evaluate(() => fetch("/api/admin/logout", { method: "POST" }));
   await page.goto(`${baseUrl}/admin/login`);

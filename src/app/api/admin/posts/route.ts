@@ -10,15 +10,16 @@ import {
   savePost,
   setPostStatus
 } from "@/lib/db/queries";
-import type { PostStatus, PostType } from "@/types/blog";
+import { isAdminCreatableContentType } from "@/lib/content/content-types";
+import type { PostStatus } from "@/types/blog";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 function normalizeBody(body: Record<string, unknown>) {
-  const type = String(body.type ?? "post") as PostType;
+  const type = String(body.type ?? "post");
   const status = String(body.status ?? "draft") as PostStatus;
-  if (!["post", "page", "project"].includes(type)) {
+  if (!isAdminCreatableContentType(type)) {
     throw new Error("Invalid content type.");
   }
   if (!["draft", "published", "trashed"].includes(status)) {

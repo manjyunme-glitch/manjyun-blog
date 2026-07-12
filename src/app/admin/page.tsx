@@ -2,7 +2,7 @@ import Link from "next/link";
 import { AdminFrame } from "@/components/admin/AdminFrame";
 import { DeploymentStatusCard } from "@/components/admin/DeploymentStatusCard";
 import { requireAdmin } from "@/lib/auth/session";
-import { dashboardStats, listPosts } from "@/lib/db/queries";
+import { dashboardStats, listAdminPostSummaries } from "@/lib/db/queries";
 import { formatDate } from "@/lib/content/format";
 
 export const dynamic = "force-dynamic";
@@ -10,12 +10,12 @@ export const dynamic = "force-dynamic";
 export default async function AdminDashboardPage() {
   await requireAdmin();
   const stats = dashboardStats();
-  const recent = listPosts({ limit: 4 });
+  const recent = listAdminPostSummaries({ limit: 4 }).posts;
 
   return (
     <AdminFrame
       title="概览"
-      subtitle="站点健康、快捷动作和最近活动。完整内容管理放在“文章”。"
+      subtitle="站点健康、快捷动作和最近活动。完整管理功能放在“内容”。"
       breadcrumbs={[{ label: "概览" }]}
       activeNav="/admin"
       action={<Link className="btn primary" href="/admin/posts/new">写新草稿</Link>}
@@ -31,7 +31,7 @@ export default async function AdminDashboardPage() {
         <section className="admin-panel quick-panel">
           <h2 className="section-title">快捷动作</h2>
           <div className="quick-actions">
-            <Link className="btn primary" href="/admin/posts/new">新建文章</Link>
+            <Link className="btn primary" href="/admin/posts/new">新建内容</Link>
             <Link className="btn" href="/admin/posts?status=draft">查看草稿</Link>
             <Link className="btn" href="/admin/posts?status=trashed">打开回收站</Link>
             <Link className="btn" href="/admin/settings">维护首页 Stack</Link>

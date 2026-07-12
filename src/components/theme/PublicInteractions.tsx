@@ -6,7 +6,7 @@ export function PublicInteractions() {
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
-    const nav = document.querySelector(".site-nav");
+    const nav = document.querySelector("[data-site-nav]");
     const update = () => {
       const active = window.scrollY > window.innerHeight * 0.28;
       setVisible(active);
@@ -22,7 +22,12 @@ export function PublicInteractions() {
       className={`scroll-top ${visible ? "visible" : ""}`}
       type="button"
       aria-label="回到顶部"
-      onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
+      aria-hidden={!visible}
+      tabIndex={visible ? 0 : -1}
+      onClick={() => {
+        const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        window.scrollTo({ top: 0, behavior: reduceMotion ? "auto" : "smooth" });
+      }}
     >
       ↑
     </button>

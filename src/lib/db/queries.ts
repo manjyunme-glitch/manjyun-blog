@@ -1,11 +1,16 @@
 import { all, get, run, transaction } from "@/lib/db/client";
 import { slugify, splitCommaList } from "@/lib/content/slug";
+import {
+  getContentTypeDefinition,
+  type AdminContentType
+} from "@/lib/content/content-types";
 import type {
   HomeModule,
   MediaRecord,
   NavLink,
   PostRecord,
   PostRevision,
+  PostSummary,
   PostStatus,
   PostType,
   PostWithTags,
@@ -20,6 +25,7 @@ type IdRow = { id: number };
 type StoredPostRevision = Omit<PostRevision, "tags"> & {
   tagsJson: string | null;
 };
+type StoredPostSummary = Omit<PostSummary, "tags">;
 
 export type SavePostInput = {
   id?: number;
@@ -47,14 +53,16 @@ const settingDefaults: SiteSettings = {
   stackItems:
     "Debian,Docker,Nginx,Cloudflare,Python,Mihomo,Xray,Hysteria2,WireGuard,ZFS",
   uptimeStart: "2026-03-20",
-  blogTitle: "All Posts",
-  blogDescription: "按时间倒序浏览博客文章。",
+  blogTitle: "随笔",
+  blogDescription: "按时间倒序浏览随笔。",
   projectsTitle: "Projects",
   projectsDescription: "记录已经完成、正在折腾、或者值得复盘的项目。",
   aboutTitle: "About",
   aboutMarkdown:
     "这里是关于页面。可以在后台设置里写 Markdown，也可以创建 slug 为 `about` 的页面来覆盖它。"
 };
+
+const previousThemeSettingKey = "previousTheme";
 
 function normalizePost(row: PostRecord): PostRecord {
   return {
@@ -290,9 +298,87 @@ export function makeUniqueSlug(type: PostType, desired: string, excludeId?: numb
 }
 
 function autoSlugPrefix(type: PostType) {
-  if (type === "project") return "projects";
-  if (type === "page") return "pages";
-  return "posts";
+  return getContentTypeDefinition(type).slugPrefix;
+}
+
+function postSummarySelect(prefix = "p") {
+  return `
+    ${prefix}.id,
+    ${prefix}.type,
+    ${prefix}.slug,
+    ${prefix}.title,
+    ${prefix}.excerpt,
+    ${prefix}.status,
+    ${prefix}.published_at AS publishedAt,
+    ${prefix}.created_at AS createdAt,
+    ${prefix}.updated_at AS updatedAt
+  `;
+}
+
+function normalizePostSummary(row: StoredPostSummary): StoredPostSummary {
+  return {
+    ...row,
+    publishedAt: row.publishedAt ?? null,
+    excerpt: row.excerpt ?? null
+  };
+}
+
+function readSettingValue(key: string) {
+  return get<SettingRow>("SELECT key, value FROM settings WHERE key = ?", [key])?.value ?? null;
+}
+
+function writeSettingValue(key: string, value: string) {
+  run(
+    "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+    [key, value]
+  );
+}
+
+export type ThemeSelection = {
+  activeTheme: string;
+  previousTheme: string | null;
+};
+
+export function getPreviousTheme() {
+  const value = readSettingValue(previousThemeSettingKey)?.trim();
+  return value || null;
+}
+
+export function getThemeSelection(): ThemeSelection {
+  return {
+    activeTheme: getSiteSettings().activeTheme,
+    previousTheme: getPreviousTheme()
+  };
+}
+
+export function activateTheme(themeId: string): ThemeSelection {
+  const target = themeId.trim();
+  if (!target) throw new Error("Theme id is required.");
+
+  return transaction(() => {
+    const current = getSiteSettings().activeTheme;
+    if (current === target) {
+      return {
+        activeTheme: current,
+        previousTheme: getPreviousTheme()
+      };
+    }
+
+    writeSettingValue(previousThemeSettingKey, current);
+    writeSettingValue("activeTheme", target);
+    return {
+      activeTheme: target,
+      previousTheme: current
+    };
+  });
+}
+
+export function rollbackTheme(): ThemeSelection | null {
+  const selection = getThemeSelection();
+  if (!selection.previousTheme || selection.previousTheme === selection.activeTheme) {
+    return null;
+  }
+  return activateTheme(selection.previousTheme);
 }
 
 function makeSequentialSlug(type: PostType, excludeId?: number) {
@@ -552,6 +638,7 @@ export function listPosts(options: {
   limit?: number;
   includePages?: boolean;
   includeTrashed?: boolean;
+  includeTags?: boolean;
 } = {}) {
   const where: string[] = [];
   const params: unknown[] = [];
@@ -585,7 +672,118 @@ export function listPosts(options: {
     sql += " LIMIT ?";
     params.push(options.limit);
   }
-  return all<PostRecord>(sql, params).map((post) => withTags(normalizePost(post)));
+  const posts = all<PostRecord>(sql, params).map(normalizePost);
+  return options.includeTags === false ? posts : posts.map(withTags);
+}
+
+export type ListAdminPostSummariesOptions = {
+  type?: AdminContentType;
+  status?: PostStatus;
+  q?: string;
+  limit?: number;
+  offset?: number;
+};
+
+function escapeLikePattern(value: string) {
+  return value.replace(/[\\%_]/g, "\\$&");
+}
+
+function adminPostWhere(options: Pick<ListAdminPostSummariesOptions, "type" | "status" | "q">) {
+  const where: string[] = [];
+  const params: unknown[] = [];
+
+  if (options.type) {
+    where.push("p.type = ?");
+    params.push(options.type);
+  } else {
+    where.push("p.type != 'page'");
+  }
+
+  if (options.status) {
+    where.push("p.status = ?");
+    params.push(options.status);
+  } else {
+    where.push("p.status != 'trashed'");
+  }
+
+  const query = options.q?.trim();
+  if (query) {
+    const pattern = `%${escapeLikePattern(query)}%`;
+    where.push(`(
+      p.title LIKE ? ESCAPE '\\'
+      OR p.slug LIKE ? ESCAPE '\\'
+      OR COALESCE(p.excerpt, '') LIKE ? ESCAPE '\\'
+      OR p.markdown LIKE ? ESCAPE '\\'
+      OR EXISTS (
+        SELECT 1
+        FROM post_tags search_pt
+        INNER JOIN tags search_t ON search_t.id = search_pt.tag_id
+        WHERE search_pt.post_id = p.id
+          AND search_t.name LIKE ? ESCAPE '\\'
+      )
+    )`);
+    params.push(pattern, pattern, pattern, pattern, pattern);
+  }
+
+  return { where, params };
+}
+
+function countAdminPosts(
+  options: Pick<ListAdminPostSummariesOptions, "type" | "status" | "q">
+) {
+  const { where, params } = adminPostWhere(options);
+  return get<CountRow>(
+    `SELECT COUNT(*) AS count FROM posts p WHERE ${where.join(" AND ")}`,
+    params
+  )!.count;
+}
+
+function loadTagsForPosts<T extends { id: number }>(posts: T[]) {
+  if (!posts.length) return posts.map((post) => ({ ...post, tags: [] as TagRecord[] }));
+
+  const tagsByPost = new Map<number, TagRecord[]>();
+  for (const post of posts) tagsByPost.set(post.id, []);
+  const placeholders = posts.map(() => "?").join(", ");
+  const rows = all<TagRecord & { postId: number }>(
+    `SELECT pt.post_id AS postId, t.id, t.slug, t.name
+     FROM post_tags pt
+     INNER JOIN tags t ON t.id = pt.tag_id
+     WHERE pt.post_id IN (${placeholders})
+     ORDER BY t.name ASC`,
+    posts.map((post) => post.id)
+  );
+  for (const { postId, ...tag } of rows) {
+    tagsByPost.get(postId)?.push(tag);
+  }
+  return posts.map((post) => ({ ...post, tags: tagsByPost.get(post.id) ?? [] }));
+}
+
+export function listAdminPostSummaries(options: ListAdminPostSummariesOptions = {}) {
+  const requestedLimit = Math.floor(options.limit ?? 20);
+  const limit = Math.min(100, Math.max(1, requestedLimit));
+  const requestedOffset = Math.max(0, Math.floor(options.offset ?? 0));
+  const { where, params } = adminPostWhere(options);
+  const total = get<CountRow>(
+    `SELECT COUNT(*) AS count FROM posts p WHERE ${where.join(" AND ")}`,
+    params
+  )!.count;
+  const lastPageOffset = total > 0 ? Math.floor((total - 1) / limit) * limit : 0;
+  const offset = total === 0 || requestedOffset >= total ? lastPageOffset : requestedOffset;
+  const rows = all<StoredPostSummary>(
+    `SELECT ${postSummarySelect("p")}
+     FROM posts p
+     WHERE ${where.join(" AND ")}
+     ORDER BY p.updated_at DESC, p.id DESC
+     LIMIT ? OFFSET ?`,
+    [...params, limit, offset]
+  ).map(normalizePostSummary);
+
+  return {
+    posts: loadTagsForPosts(rows),
+    total,
+    limit,
+    offset
+  };
 }
 
 export function getPostById(id: number) {
@@ -871,34 +1069,39 @@ export function dashboardStats() {
       "SELECT COUNT(*) AS count FROM posts WHERE type = 'project' AND status != 'trashed'"
     )!.count,
     published: get<CountRow>(
-      "SELECT COUNT(*) AS count FROM posts WHERE status = 'published'"
+      "SELECT COUNT(*) AS count FROM posts WHERE type != 'page' AND status = 'published'"
     )!.count,
     drafts: get<CountRow>(
-      "SELECT COUNT(*) AS count FROM posts WHERE status = 'draft'"
+      "SELECT COUNT(*) AS count FROM posts WHERE type != 'page' AND status = 'draft'"
     )!.count,
     trashed: get<CountRow>(
-      "SELECT COUNT(*) AS count FROM posts WHERE status = 'trashed'"
+      "SELECT COUNT(*) AS count FROM posts WHERE type != 'page' AND status = 'trashed'"
     )!.count,
     media: get<CountRow>("SELECT COUNT(*) AS count FROM media")!.count
   };
 }
 
-export function contentStatusCounts() {
-  const published = get<CountRow>(
-    "SELECT COUNT(*) AS count FROM posts WHERE type != 'page' AND status = 'published'"
-  )!.count;
-  const draft = get<CountRow>(
-    "SELECT COUNT(*) AS count FROM posts WHERE type != 'page' AND status = 'draft'"
-  )!.count;
-  const trashed = get<CountRow>(
-    "SELECT COUNT(*) AS count FROM posts WHERE type != 'page' AND status = 'trashed'"
-  )!.count;
+export function contentStatusCounts(type?: AdminContentType, q?: string) {
+  const published = countAdminPosts({ type, q, status: "published" });
+  const draft = countAdminPosts({ type, q, status: "draft" });
+  const trashed = countAdminPosts({ type, q, status: "trashed" });
 
   return {
     all: published + draft,
     published,
     draft,
     trashed
+  };
+}
+
+export function contentTypeCounts(status?: PostStatus, q?: string) {
+  const post = countAdminPosts({ type: "post", status, q });
+  const project = countAdminPosts({ type: "project", status, q });
+
+  return {
+    all: post + project,
+    post,
+    project
   };
 }
 

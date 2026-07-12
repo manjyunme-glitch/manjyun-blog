@@ -11,7 +11,10 @@ test("schema migration adds revision tags without reseeding an existing empty na
   const db = new DatabaseSync(path.join(root, "schema.sqlite"));
   db.exec(`
     CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-    INSERT INTO settings (key, value) VALUES ('siteTitle', 'Existing Blog');
+    INSERT INTO settings (key, value) VALUES
+      ('siteTitle', 'Existing Blog'),
+      ('blogTitle', 'All Posts'),
+      ('blogDescription', '按时间倒序浏览博客文章。');
 
     CREATE TABLE posts (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -68,5 +71,41 @@ test("schema migration adds revision tags without reseeding an existing empty na
     }).value,
     "1"
   );
+  assert.equal(
+    (db.prepare("SELECT value FROM settings WHERE key = 'blogTitle'").get() as {
+      value: string;
+    }).value,
+    "随笔"
+  );
+  assert.equal(
+    (db.prepare("SELECT value FROM settings WHERE key = 'blogDescription'").get() as {
+      value: string;
+    }).value,
+    "按时间倒序浏览随笔。"
+  );
+  db.close();
+});
+
+test("schema migration preserves customized blog labels", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "manjyun-schema-custom-"));
+  const db = new DatabaseSync(path.join(root, "schema.sqlite"));
+  db.exec(`
+    CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+    INSERT INTO settings (key, value) VALUES
+      ('blogTitle', '我的手记'),
+      ('blogDescription', '只记录值得留下来的东西。');
+  `);
+
+  ensureSchema(db);
+
+  const values = Object.fromEntries(
+    (db.prepare(
+      "SELECT key, value FROM settings WHERE key IN ('blogTitle', 'blogDescription')"
+    ).all() as Array<{ key: string; value: string }>).map(({ key, value }) => [key, value])
+  );
+  assert.deepEqual(values, {
+    blogDescription: "只记录值得留下来的东西。",
+    blogTitle: "我的手记"
+  });
   db.close();
 });

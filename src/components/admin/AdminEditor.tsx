@@ -4,14 +4,18 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { formatDate, formatDateTime } from "@/lib/content/format";
+import {
+  CONTENT_TYPE_DEFINITIONS,
+  getContentTypeDefinition
+} from "@/lib/content/content-types";
+import { COMMON_POST_TAGS, hasTag, toggleTag } from "@/lib/admin/tags";
 import type { PostRevision, PostStatus, PostType, PostWithTags } from "@/types/blog";
 
-type EditablePostType = Extract<PostType, "post" | "project">;
 type RevisionFilter = "all" | Extract<PostStatus, "published" | "draft">;
 
 type Draft = {
   id?: number;
-  type: EditablePostType;
+  type: PostType;
   title: string;
   slug: string;
   excerpt: string;
@@ -31,9 +35,7 @@ const revisionFilters: Array<{ id: RevisionFilter; label: string }> = [
   { id: "draft", label: "草稿" }
 ];
 
-const starterMarkdown = `# 这里写正文标题
-
-标题字段用于后台列表、SEO 和管理识别；公开正文标题请在 Markdown 里写。
+const starterMarkdown = `标题字段会作为公开页面唯一的一级标题；正文从段落或二级标题开始即可。
 
 ## 小标题
 
@@ -45,7 +47,7 @@ const starterMarkdown = `# 这里写正文标题
 function draftFromPost(post: PostWithTags | null): Draft {
   return {
     id: post?.id,
-    type: post?.type === "project" ? "project" : "post",
+    type: post?.type ?? "post",
     title: post?.title ?? "",
     slug: post?.slug ?? "",
     excerpt: post?.excerpt ?? "",
@@ -62,7 +64,7 @@ export function AdminEditor({
   post,
   revisions = emptyRevisions,
   backHref = "/admin/posts",
-  backLabel = "返回文章列表"
+  backLabel = "返回内容列表"
 }: {
   post: PostWithTags | null;
   revisions?: PostRevision[];
@@ -72,12 +74,14 @@ export function AdminEditor({
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const pendingRef = useRef(false);
+  const dirtyRef = useRef(false);
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState("");
   const [preview, setPreview] = useState("");
   const [helpOpen, setHelpOpen] = useState(false);
   const [revisionOpen, setRevisionOpen] = useState(false);
   const [draft, setDraft] = useState<Draft>(() => draftFromPost(post));
+  const [isDirty, setIsDirty] = useState(false);
   const [revisionItems, setRevisionItems] = useState<PostRevision[]>(revisions);
   const [revisionFilter, setRevisionFilter] = useState<RevisionFilter>("all");
   const [selectedRevisionId, setSelectedRevisionId] = useState<number | null>(
@@ -114,6 +118,17 @@ export function AdminEditor({
     });
   }, [revisions]);
 
+  useEffect(() => {
+    if (!isDirty) return;
+    const warnBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!dirtyRef.current) return;
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warnBeforeUnload);
+    return () => window.removeEventListener("beforeunload", warnBeforeUnload);
+  }, [isDirty]);
+
   const revisionCounts = useMemo(
     () => ({
       all: revisionItems.length,
@@ -147,6 +162,12 @@ export function AdminEditor({
 
   function update<K extends keyof Draft>(key: K, value: Draft[K]) {
     setDraft((current) => ({ ...current, [key]: value }));
+    dirtyRef.current = true;
+    setIsDirty(true);
+  }
+
+  function confirmLeave() {
+    return !dirtyRef.current || window.confirm("还有未保存的修改，确定离开编辑器？");
   }
 
   async function runPending(fallbackMessage: string, task: () => Promise<void>) {
@@ -185,6 +206,8 @@ export function AdminEditor({
         return;
       }
       setDraft((current) => ({ ...current, id: data.id, slug: data.slug || current.slug, status }));
+      dirtyRef.current = false;
+      setIsDirty(false);
       setMessage(successMessage ?? (status === "published" ? "已发布" : "已保存草稿"));
       if (wasNew) {
         window.location.assign(`/admin/posts/${data.id}`);
@@ -202,6 +225,8 @@ export function AdminEditor({
         setMessage("删除失败");
         return;
       }
+      dirtyRef.current = false;
+      setIsDirty(false);
       router.push("/admin/posts?status=trashed");
     });
   }
@@ -209,7 +234,11 @@ export function AdminEditor({
   async function patchStatus(action: "trash" | "restore") {
     if (!draft.id) return;
     const confirmMessage =
-      action === "trash" ? "确定移到回收站？公开页面会立即隐藏。" : "";
+      action === "trash"
+        ? dirtyRef.current
+          ? "还有未保存的修改；移到回收站会放弃这些修改并立即隐藏公开页面，确定继续？"
+          : "确定移到回收站？公开页面会立即隐藏。"
+        : "";
     if (confirmMessage && !window.confirm(confirmMessage)) return;
 
     setMessage("");
@@ -229,6 +258,8 @@ export function AdminEditor({
       }
 
       setDraft((current) => ({ ...current, status: data.status }));
+      dirtyRef.current = false;
+      setIsDirty(false);
       setMessage(action === "trash" ? "已移到回收站" : "已恢复为草稿");
       if (action === "trash") {
         router.push("/admin/posts?status=trashed");
@@ -242,6 +273,12 @@ export function AdminEditor({
     if (!draft.id) return;
     const targetRevision = revisionItems.find((revision) => revision.id === revisionId);
     if (!targetRevision) return;
+    if (
+      dirtyRef.current &&
+      !window.confirm("回退版本会覆盖当前未保存的修改，确定继续？")
+    ) {
+      return;
+    }
     if (
       targetRevision.status !== draft.status &&
       !window.confirm(
@@ -272,6 +309,8 @@ export function AdminEditor({
       }
 
       setDraft(draftFromPost(data.post));
+      dirtyRef.current = false;
+      setIsDirty(false);
       setRevisionItems(data.revisions);
       setSelectedRevisionId(data.revisions[0]?.id ?? null);
       setMessage(`已回退为${statusText(data.post.status, false)}`);
@@ -315,7 +354,7 @@ export function AdminEditor({
             <span className={`status-pill ${draft.status}`}>{statusText(draft.status, !draft.id)}</span>
             <span className="type-pill">{typeText(draft.type)}</span>
             {post ? (
-              <div className="editor-dates" aria-label="文章时间">
+              <div className="editor-dates" aria-label="内容时间">
                 <span>
                   <b>创建</b>
                   {formatDate(post.createdAt)}
@@ -334,7 +373,13 @@ export function AdminEditor({
             )}
           </div>
           <div className="btn-row">
-            <Link className="btn ghost" href={backHref}>
+            <Link
+              className="btn ghost"
+              href={backHref}
+              onClick={(event) => {
+                if (!confirmLeave()) event.preventDefault();
+              }}
+            >
               {backLabel}
             </Link>
             {draft.status === "trashed" ? (
@@ -377,8 +422,11 @@ export function AdminEditor({
               写作帮助
             </button>
           </div>
-          <span className={message.includes("失败") ? "error-text" : "success-text"}>
-            {pending ? "保存中..." : message}
+          <span
+            className={message.includes("失败") ? "error-text" : "success-text"}
+            aria-live="polite"
+          >
+            {pending ? "保存中..." : message || (isDirty ? "有未保存的修改" : "")}
           </span>
         </div>
 
@@ -511,19 +559,58 @@ export function AdminEditor({
           </div>
           <div className="field">
             <label>Slug</label>
-            <input className="input" value={draft.slug} disabled={draft.status === "trashed"} onChange={(event) => update("slug", event.target.value)} placeholder={draft.type === "project" ? "留空自动生成 projects-001" : "留空自动生成 posts-001"} />
+            <input className="input" value={draft.slug} disabled={draft.status === "trashed"} onChange={(event) => update("slug", event.target.value)} placeholder={`留空自动生成 ${getContentTypeDefinition(draft.type).slugPrefix}-001`} />
           </div>
           <div className="field">
             <label>类型</label>
-            <select className="select" value={draft.type} disabled={draft.status === "trashed"} onChange={(event) => update("type", event.target.value as EditablePostType)}>
-              <option value="post">文章</option>
-              <option value="project">项目</option>
+            <select className="select" value={draft.type} disabled={draft.status === "trashed" || draft.type === "page"} onChange={(event) => update("type", event.target.value as PostType)}>
+              {draft.type === "page" ? (
+                <option value="page">页面（系统）</option>
+              ) : (
+                <>
+                  <option value="post">随笔</option>
+                  <option value="project">项目</option>
+                </>
+              )}
             </select>
-            <p className="field-hint">页面类型已移除，固定页面内容改在站点设置里维护。</p>
+            <p className="field-hint">
+              {draft.type === "page"
+                ? "这是兼容旧数据的隐藏系统类型；可以编辑内容，但不能改成其他类型。"
+                : "系统页面不在常规内容列表与新建选项中显示。"}
+            </p>
           </div>
-          <div className="field">
-            <label>标签，逗号分隔</label>
-            <input className="input" value={draft.tags} disabled={draft.status === "trashed"} onChange={(event) => update("tags", event.target.value)} />
+          <div className="field tag-picker-field">
+            <label htmlFor="post-tags">标签</label>
+            <input
+              id="post-tags"
+              className="input"
+              value={draft.tags}
+              disabled={draft.status === "trashed"}
+              aria-describedby="post-tags-hint"
+              placeholder="输入标签，用逗号分隔"
+              onChange={(event) => update("tags", event.target.value)}
+            />
+            <div className="tag-suggestions" role="group" aria-label="常用标签快捷选择">
+              {COMMON_POST_TAGS.map((tag) => {
+                const selected = hasTag(draft.tags, tag);
+                return (
+                  <button
+                    key={tag}
+                    className={`tag-suggestion ${selected ? "is-selected" : ""}`}
+                    type="button"
+                    aria-pressed={selected}
+                    aria-label={`${selected ? "移除" : "添加"}标签“${tag}”`}
+                    disabled={draft.status === "trashed"}
+                    onClick={() => update("tags", toggleTag(draft.tags, tag))}
+                  >
+                    {tag}
+                  </button>
+                );
+              })}
+            </div>
+            <p id="post-tags-hint" className="field-hint">
+              点选常用标签可添加或移除；也可以手工输入，用中文或英文逗号分隔。
+            </p>
           </div>
           <div className="field">
             <label>摘要</label>
@@ -582,8 +669,8 @@ function statusText(status: PostStatus, isNew: boolean) {
   return "草稿";
 }
 
-function typeText(type: EditablePostType) {
-  return type === "project" ? "项目" : "文章";
+function typeText(type: PostType) {
+  return CONTENT_TYPE_DEFINITIONS[type].label;
 }
 
 function revisionReasonText(reason: string) {
@@ -618,11 +705,11 @@ function WritingHelp() {
       <div className="settings-section-head">
         <div>
           <h2>Markdown 写作速查</h2>
-          <p>这些语法会在公开文章页按当前主题渲染。</p>
+          <p>这些语法会在公开内容页按当前主题渲染。</p>
         </div>
       </div>
       <div className="help-grid">
-        <HelpItem title="标题" code={"# 一级标题\n## 二级标题\n### 三级标题"} />
+        <HelpItem title="正文标题" code={"## 二级标题\n### 三级标题\n\n页面的一级标题使用右侧“标题”字段。"} />
         <HelpItem title="列表" code={"- 无序列表\n1. 有序列表\n- [ ] 待办\n- [x] 完成"} />
         <HelpItem title="引用与强调" code={"> 引用内容\n**加粗**\n*斜体*"} />
         <HelpItem title="代码" code={"`inline code`\n\n```ts\nconst port = 4482;\n```"} />

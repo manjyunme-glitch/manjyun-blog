@@ -73,24 +73,32 @@ function preprocessCards(markdown: string) {
     );
 }
 
-export function renderMarkdown(markdown: string): RenderedMarkdown {
+export function renderMarkdown(
+  markdown: string,
+  options: { demoteH1?: boolean } = {}
+): RenderedMarkdown {
   const toc: RenderedMarkdown["toc"] = [];
+  const headingIds = new Set<string>();
   const renderer = new Renderer();
 
   renderer.heading = ({ tokens, depth }) => {
     const text = tokens.map((token) => token.raw).join("");
-    if (depth === 2 || depth === 3) {
+    const renderedDepth = options.demoteH1 && depth === 1 ? 2 : depth;
+    if (renderedDepth === 2 || renderedDepth === 3) {
       const base = slugify(text, "heading");
       let id = base;
       let index = 2;
-      while (toc.some((item) => item.id === id)) {
+      while (headingIds.has(id)) {
         id = `${base}-${index}`;
         index += 1;
       }
-      toc.push({ id, level: depth, text });
-      return `<h${depth} id="${id}">${marked.parseInline(text)}</h${depth}>`;
+      headingIds.add(id);
+      if (renderedDepth === 2) {
+        toc.push({ id, level: renderedDepth, text });
+      }
+      return `<h${renderedDepth} id="${id}">${marked.parseInline(text)}</h${renderedDepth}>`;
     }
-    return `<h${depth}>${marked.parseInline(text)}</h${depth}>`;
+    return `<h${renderedDepth}>${marked.parseInline(text)}</h${renderedDepth}>`;
   };
 
   renderer.blockquote = ({ tokens }) => {
@@ -171,4 +179,31 @@ export function renderMarkdown(markdown: string): RenderedMarkdown {
     .trim();
 
   return { html: safeHtml, text, toc };
+}
+
+function normalizeTitleText(value: string) {
+  return value
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    .replace(/[*_`~]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLocaleLowerCase("zh-CN");
+}
+
+export function stripDuplicateLeadingTitle(markdown: string, title: string) {
+  const leadingH1 = markdown.match(
+    /^(\uFEFF?\s{0,3})#\s+(.+?)(?:\s+#+)?\s*(?:\r?\n|$)/
+  );
+  if (!leadingH1) return markdown;
+  if (normalizeTitleText(leadingH1[2]) !== normalizeTitleText(title)) {
+    return markdown;
+  }
+  return markdown.slice(leadingH1[0].length).replace(/^\s*\r?\n/, "");
+}
+
+export function renderEntryMarkdown(markdown: string, title: string) {
+  return renderMarkdown(stripDuplicateLeadingTitle(markdown, title), {
+    demoteH1: true
+  });
 }

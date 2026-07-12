@@ -1,13 +1,17 @@
 import type { Metadata, Viewport } from "next";
+import { StructuredData } from "@/components/seo/StructuredData";
+import { getSiteSettings } from "@/lib/db/queries";
+import {
+  createSiteMetadata,
+  createWebsiteStructuredData
+} from "@/lib/seo/metadata";
 import "./globals.css";
+import "@/themes/manjyun-console/theme.css";
+import "@/themes/paper-atlas/theme.css";
 
-export const metadata: Metadata = {
-  title: "ManJyun Blog",
-  description: "A self-hosted personal blog system.",
-  icons: {
-    icon: [{ url: "/icon-mj-terminal.svg", type: "image/svg+xml" }]
-  }
-};
+export function generateMetadata(): Metadata {
+  return createSiteMetadata(getSiteSettings());
+}
 
 export const viewport: Viewport = {
   width: "device-width",
@@ -16,9 +20,13 @@ export const viewport: Viewport = {
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
+  const settings = getSiteSettings();
   return (
     <html lang="zh-CN">
-      <body>{children}</body>
+      <body>
+        <StructuredData data={createWebsiteStructuredData(settings)} />
+        {children}
+      </body>
     </html>
   );
 }

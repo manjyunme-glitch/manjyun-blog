@@ -28,6 +28,21 @@ export type PostWithTags = PostRecord & {
   tags: TagRecord[];
 };
 
+export type PostSummary = Pick<
+  PostRecord,
+  | "id"
+  | "type"
+  | "slug"
+  | "title"
+  | "excerpt"
+  | "status"
+  | "publishedAt"
+  | "createdAt"
+  | "updatedAt"
+> & {
+  tags: TagRecord[];
+};
+
 export type PostRevision = {
   id: number;
   postId: number;

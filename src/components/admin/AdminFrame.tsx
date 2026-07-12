@@ -14,11 +14,11 @@ const primaryLinks = [
 ] as const;
 
 const contentLinks = [
-  ["/admin/posts", "全部文章"],
+  ["/admin/posts", "全部内容"],
   ["/admin/posts?status=published", "已发布"],
   ["/admin/posts?status=draft", "草稿"],
   ["/admin/posts?status=trashed", "回收站"],
-  ["/admin/posts/new", "新建文章"]
+  ["/admin/posts/new", "新建内容"]
 ] as const;
 
 export function AdminFrame({
