@@ -202,3 +202,25 @@ test("neon rift consumes stable view models without rebuilding business URLs", (
   assert.match(source, /data-site-nav/);
   assert.match(source, /aria-current=\{item\.isCurrent/);
 });
+
+test("neon rift keeps its article toc sticky and its telemetry readable", () => {
+  const source = readFileSync(
+    new URL("../src/themes/neon-rift/theme.css", import.meta.url),
+    "utf8"
+  );
+  assert.match(source, /overflow-x:\s*clip/);
+  assert.match(source, /\.rift-status-panel h2\s*\{\s*color:\s*#111114/);
+  assert.match(source, /\.rift-status-panel dd\s*\{\s*color:\s*#111114/);
+  assert.match(source, /@keyframes rift-title-flicker/);
+});
+
+test("theme manager uses purpose-built thumbnails instead of scrollable iframes", () => {
+  const source = readFileSync(
+    new URL("../src/components/admin/ThemeManager.tsx", import.meta.url),
+    "utf8"
+  );
+  assert.doesNotMatch(source, /<iframe/);
+  assert.match(source, /theme-preview-console/);
+  assert.match(source, /theme-preview-paper/);
+  assert.match(source, /theme-preview-neon/);
+});

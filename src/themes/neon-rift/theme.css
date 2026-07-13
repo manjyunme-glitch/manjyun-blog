@@ -21,7 +21,7 @@
     background-size: auto, auto, 48px 48px, 48px 48px, auto;
     font-family: "Segoe UI", "Microsoft YaHei UI", "PingFang SC", system-ui, sans-serif;
     letter-spacing: 0.01em;
-    overflow: hidden;
+    overflow-x: clip;
     position: relative;
   }
 
@@ -719,8 +719,16 @@
     letter-spacing: -0.08em;
   }
   [data-theme="neon-rift"] .rift-hero h1::after {
-    transform: translate(7px, 4px);
-    clip-path: inset(56% 0 20% 0);
+    z-index: -1;
+    color: var(--rift-pink);
+    transform: translate(8px, 9px);
+    clip-path: none;
+    animation: rift-title-shadow 4.6s steps(1, end) infinite;
+  }
+  [data-theme="neon-rift"] .rift-hero h1 {
+    isolation: isolate;
+    z-index: 0;
+    animation: rift-title-flicker 4.6s steps(1, end) infinite;
   }
   [data-theme="neon-rift"] .rift-hero-bio {
     max-width: 36ch;
@@ -931,17 +939,23 @@
     border-color: var(--rift-line);
     background: linear-gradient(145deg, rgba(20, 20, 22, 0.94), rgba(11, 11, 13, 0.9));
   }
+  [data-theme="neon-rift"] .rift-status-panel {
+    color: #111114;
+    border-color: rgba(17, 17, 20, 0.5);
+    background: linear-gradient(145deg, #fcee0a 0 72%, #e9dc00 72% 100%);
+  }
+  [data-theme="neon-rift"] .rift-status-panel h2 { color: #111114; }
   [data-theme="neon-rift"] :where(.rift-status-panel, .rift-link-panel, .rift-stack-panel)::before {
     width: 72px;
     border-top: 2px solid var(--rift-cyan);
   }
   [data-theme="neon-rift"] .rift-status-panel .rift-panel-code,
-  [data-theme="neon-rift"] .rift-status-panel dt { color: var(--rift-muted); }
-  [data-theme="neon-rift"] .rift-status-panel strong { color: var(--rift-cyan); }
-  [data-theme="neon-rift"] .rift-status-panel strong i { background: var(--rift-cyan); box-shadow: 0 0 12px var(--rift-cyan); }
-  [data-theme="neon-rift"] .rift-status-panel dl div { border-color: var(--rift-line); }
-  [data-theme="neon-rift"] .rift-status-panel dd { color: #cad6d9; font-weight: 400; }
-  [data-theme="neon-rift"] .rift-completed span { color: var(--rift-muted); background: rgba(0, 240, 255, 0.07); }
+  [data-theme="neon-rift"] .rift-status-panel dt { color: #403d0b; font-weight: 700; }
+  [data-theme="neon-rift"] .rift-status-panel strong { color: #a8002b; }
+  [data-theme="neon-rift"] .rift-status-panel strong i { background: #a8002b; box-shadow: 0 0 0 3px rgba(168, 0, 43, 0.16); }
+  [data-theme="neon-rift"] .rift-status-panel dl div { border-color: rgba(17, 17, 20, 0.28); }
+  [data-theme="neon-rift"] .rift-status-panel dd { color: #111114; font-weight: 800; }
+  [data-theme="neon-rift"] .rift-status-panel .rift-completed span { color: #111114; background: rgba(17, 17, 20, 0.12); font-weight: 700; }
   [data-theme="neon-rift"] .rift-node-link b,
   [data-theme="neon-rift"] .rift-node-link:hover strong { color: var(--rift-cyan); }
 
@@ -1121,6 +1135,20 @@
   @keyframes rift-beacon-wave {
     0% { opacity: 0.82; transform: translate(-50%, -50%) scale(0.2); }
     78%, 100% { opacity: 0; transform: translate(-50%, -50%) scale(1.45); }
+  }
+
+  @keyframes rift-title-flicker {
+    0%, 6%, 9%, 12%, 62%, 65%, 100% { opacity: 1; transform: translate(0); }
+    7%, 11% { opacity: 0.48; transform: translateX(1px); }
+    63% { opacity: 0.72; transform: translateX(-2px); }
+    64% { opacity: 0.28; transform: translateX(2px); }
+  }
+
+  @keyframes rift-title-shadow {
+    0%, 60%, 66%, 100% { transform: translate(8px, 9px); }
+    61% { transform: translate(12px, 9px); }
+    63% { transform: translate(5px, 9px); }
+    65% { transform: translate(10px, 9px); }
   }
 
   @media (max-width: 780px) {

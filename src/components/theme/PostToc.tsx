@@ -88,9 +88,11 @@ export function PostToc({ items }: { items: TocItem[] }) {
 
     update();
     window.addEventListener("scroll", update, { passive: true });
+    document.addEventListener("scroll", update, { passive: true, capture: true });
     window.addEventListener("resize", update);
     return () => {
       window.removeEventListener("scroll", update);
+      document.removeEventListener("scroll", update, { capture: true });
       window.removeEventListener("resize", update);
     };
   }, []);
@@ -135,11 +137,32 @@ export function PostToc({ items }: { items: TocItem[] }) {
       requestAnimationFrame(update);
     };
 
+    const headings = ids
+      .map((id) => document.getElementById(id))
+      .filter((heading): heading is HTMLElement => Boolean(heading));
+    const observer = new IntersectionObserver(onScroll, {
+      root: null,
+      rootMargin: `-${Math.round(navOffset())}px 0px -55% 0px`,
+      threshold: [0, 0.01, 1]
+    });
+    headings.forEach((heading) => observer.observe(heading));
+
+    let lastKnownScrollY = window.scrollY;
+    const scrollPoll = window.setInterval(() => {
+      if (window.scrollY === lastKnownScrollY) return;
+      lastKnownScrollY = window.scrollY;
+      update();
+    }, 120);
+
     update();
     window.addEventListener("scroll", onScroll, { passive: true });
+    document.addEventListener("scroll", onScroll, { passive: true, capture: true });
     window.addEventListener("resize", onScroll);
     return () => {
+      window.clearInterval(scrollPoll);
+      observer.disconnect();
       window.removeEventListener("scroll", onScroll);
+      document.removeEventListener("scroll", onScroll, { capture: true });
       window.removeEventListener("resize", onScroll);
     };
   }, [ids]);

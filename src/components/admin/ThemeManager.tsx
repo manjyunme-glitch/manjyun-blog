@@ -8,6 +8,55 @@ import type { ThemeDefinition } from "@/themes/types";
 type CompiledTheme = ThemeDefinition["meta"] &
   Pick<ThemeDefinition, "apiVersion" | "capabilities">;
 
+function ThemeCardPreview({ themeId, themeName }: { themeId: string; themeName: string }) {
+  if (themeId === "manjyun-console") {
+    return (
+      <div className="theme-preview theme-preview-console" role="img" aria-label={`${themeName} 主题缩略预览`}>
+        <div className="theme-mini-console-head"><b>M</b><strong>ManJyun</strong><i /></div>
+        <div className="theme-mini-console-nav"><span>./home</span><span>./posts</span><span>./projects</span></div>
+        <div className="theme-mini-console-body">
+          <code>ManJyun@homelab:~$ cat about.me</code>
+          <strong>profile loaded.</strong>
+          <span>self-hosted / homelab / notes</span>
+          <i /><i /><i />
+        </div>
+      </div>
+    );
+  }
+
+  if (themeId === "paper-atlas") {
+    return (
+      <div className="theme-preview theme-preview-paper" role="img" aria-label={`${themeName} 主题缩略预览`}>
+        <div className="theme-mini-paper-head"><b>Pa</b><strong>ManJyun</strong><span>FIELD NOTES</span></div>
+        <div className="theme-mini-paper-nav"><strong>home</strong><span>posts</span><span>projects</span></div>
+        <div className="theme-mini-paper-body">
+          <small>VOL. 01 · INDEPENDENT PUBLISHING</small>
+          <h3>Notes from a self-hosted life.</h3>
+          <div><i /><i /><i /></div>
+        </div>
+      </div>
+    );
+  }
+
+  if (themeId === "neon-rift") {
+    return (
+      <div className="theme-preview theme-preview-neon" role="img" aria-label={`${themeName} 主题缩略预览`}>
+        <div className="theme-mini-neon-head"><i /><strong>MANJYUN</strong><span>NO SAFE MODE</span></div>
+        <div className="theme-mini-neon-nav"><strong>01 HOME</strong><span>02 POSTS</span><span>03 PROJECTS</span></div>
+        <div className="theme-mini-neon-copy"><small>LOCAL USER PROFILE</small><b>MANJYUN</b><i>MANJYUN</i></div>
+        <div className="theme-mini-neon-tower" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="theme-preview theme-preview-generic" role="img" aria-label={`${themeName} 主题缩略预览`}>
+      <strong>{themeName}</strong>
+      <span>Theme API preview</span>
+    </div>
+  );
+}
+
 export function ThemeManager({
   activeTheme,
   previousTheme,
@@ -172,14 +221,7 @@ export function ThemeManager({
           const previewHref = `/theme-preview/${encodeURIComponent(theme.id)}`;
           return (
             <article className="theme-card" key={theme.id}>
-              <div className="theme-preview">
-                <iframe
-                  src={previewHref}
-                  title={`${theme.name} 真实首页预览`}
-                  loading={isActive ? "eager" : "lazy"}
-                  tabIndex={-1}
-                />
-              </div>
+              <ThemeCardPreview themeId={theme.id} themeName={theme.name} />
               <div className="theme-card-body">
                 <div className="theme-card-copy">
                   <h2>{theme.name}</h2>
