@@ -44,6 +44,52 @@
   }
 }
 
+/* Amber terminal scrollbars for both the document viewport and nested scrollers. */
+@supports not selector(::-webkit-scrollbar) {
+  html:has([data-theme="manjyun-console"]),
+  [data-theme="manjyun-console"] {
+    scrollbar-color: #9d7542 #101010;
+    scrollbar-width: thin;
+  }
+}
+
+@supports selector(::-webkit-scrollbar) {
+  html:has([data-theme="manjyun-console"])::-webkit-scrollbar,
+  [data-theme="manjyun-console"]::-webkit-scrollbar,
+  [data-theme="manjyun-console"] *::-webkit-scrollbar {
+    width: 11px;
+    height: 11px;
+  }
+
+  html:has([data-theme="manjyun-console"])::-webkit-scrollbar-track,
+  [data-theme="manjyun-console"]::-webkit-scrollbar-track,
+  [data-theme="manjyun-console"] *::-webkit-scrollbar-track {
+    background: #101010;
+    box-shadow: inset 1px 0 #26231f;
+  }
+
+  html:has([data-theme="manjyun-console"])::-webkit-scrollbar-thumb,
+  [data-theme="manjyun-console"]::-webkit-scrollbar-thumb,
+  [data-theme="manjyun-console"] *::-webkit-scrollbar-thumb {
+    min-height: 48px;
+    border: 3px solid #101010;
+    border-radius: 999px;
+    background: #8b6a3e;
+  }
+
+  html:has([data-theme="manjyun-console"])::-webkit-scrollbar-thumb:hover,
+  [data-theme="manjyun-console"]::-webkit-scrollbar-thumb:hover,
+  [data-theme="manjyun-console"] *::-webkit-scrollbar-thumb:hover {
+    background: #e8a84c;
+  }
+
+  html:has([data-theme="manjyun-console"])::-webkit-scrollbar-corner,
+  [data-theme="manjyun-console"]::-webkit-scrollbar-corner,
+  [data-theme="manjyun-console"] *::-webkit-scrollbar-corner {
+    background: #101010;
+  }
+}
+
 @scope ([data-theme="manjyun-console"]) {
   :scope {
     --bg: #0a0a0a;
@@ -79,7 +125,6 @@
     font-family: var(--sans);
     font-size: 15px;
     line-height: 1.58;
-    scrollbar-color: rgba(146, 140, 131, 0.55) rgba(255, 255, 255, 0.03);
     text-wrap: pretty;
     -webkit-font-smoothing: antialiased;
   }

@@ -214,6 +214,38 @@ test("neon rift keeps its article toc sticky and its telemetry readable", () => 
   assert.match(source, /@keyframes rift-title-flicker/);
   assert.match(source, /@keyframes rift-title-signal/);
   assert.match(source, /\.rift-nav a\[aria-current="page"\]\s*\{[\s\S]*?color:\s*#050506/);
+  assert.match(source, /\.rift-article-head h1\s*\{[^}]*font-size:\s*clamp\(2\.6rem,\s*5vw,\s*4\.75rem\)/);
+  assert.match(source, /\.toc-links\s*\{[^}]*max-height:\s*calc\(66\.667vh - 126\.667px\)[^}]*scrollbar-width:\s*none/);
+  assert.match(source, /\.toc-links::-webkit-scrollbar\s*\{\s*width:\s*0;\s*height:\s*0/);
+  assert.doesNotMatch(source, /background-size:\s*auto,\s*56px 56px,\s*56px 56px/);
+  assert.doesNotMatch(source, /background-size:\s*auto,\s*32px 32px,\s*32px 32px/);
+});
+
+test("public themes style viewport and nested scrollbars with their own palette", () => {
+  const themes = [
+    ["manjyun-console", "#9d7542 #101010"],
+    ["neon-rift", "#fcee0a #101013"],
+    ["paper-atlas", "#aa3527 #e8e1d2"]
+  ] as const;
+
+  for (const [themeId, standardColors] of themes) {
+    const source = readFileSync(
+      new URL(`../src/themes/${themeId}/theme.css`, import.meta.url),
+      "utf8"
+    );
+    assert.ok(
+      source.includes(`html:has([data-theme="${themeId}"])::-webkit-scrollbar`),
+      `${themeId} should style the viewport scrollbar`
+    );
+    assert.ok(
+      source.includes(`[data-theme="${themeId}"] *::-webkit-scrollbar-thumb`),
+      `${themeId} should style nested scrollbar thumbs`
+    );
+    assert.ok(
+      source.includes(`scrollbar-color: ${standardColors}`),
+      `${themeId} should include a standards-based scrollbar fallback`
+    );
+  }
 });
 
 test("theme manager uses purpose-built thumbnails instead of scrollable iframes", () => {

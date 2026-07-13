@@ -1,3 +1,50 @@
+/* Theme-aware viewport and nested scrollbars. The standard-property fallback
+ * covers Firefox; Chromium/Safari get the more distinctive segmented thumb. */
+@supports not selector(::-webkit-scrollbar) {
+  html:has([data-theme="neon-rift"]),
+  [data-theme="neon-rift"] {
+    scrollbar-color: #fcee0a #101013;
+    scrollbar-width: thin;
+  }
+}
+
+@supports selector(::-webkit-scrollbar) {
+  html:has([data-theme="neon-rift"])::-webkit-scrollbar,
+  [data-theme="neon-rift"]::-webkit-scrollbar,
+  [data-theme="neon-rift"] *::-webkit-scrollbar {
+    width: 12px;
+    height: 12px;
+  }
+
+  html:has([data-theme="neon-rift"])::-webkit-scrollbar-track,
+  [data-theme="neon-rift"]::-webkit-scrollbar-track,
+  [data-theme="neon-rift"] *::-webkit-scrollbar-track {
+    background: #101013;
+    box-shadow: inset 1px 0 rgba(252, 238, 10, 0.13);
+  }
+
+  html:has([data-theme="neon-rift"])::-webkit-scrollbar-thumb,
+  [data-theme="neon-rift"]::-webkit-scrollbar-thumb,
+  [data-theme="neon-rift"] *::-webkit-scrollbar-thumb {
+    min-height: 52px;
+    border: 3px solid #101013;
+    border-radius: 0;
+    background: linear-gradient(180deg, #fcee0a 0 72%, #ff003c 72% 100%);
+  }
+
+  html:has([data-theme="neon-rift"])::-webkit-scrollbar-thumb:hover,
+  [data-theme="neon-rift"]::-webkit-scrollbar-thumb:hover,
+  [data-theme="neon-rift"] *::-webkit-scrollbar-thumb:hover {
+    background: linear-gradient(180deg, #00f0ff 0 72%, #ff003c 72% 100%);
+  }
+
+  html:has([data-theme="neon-rift"])::-webkit-scrollbar-corner,
+  [data-theme="neon-rift"]::-webkit-scrollbar-corner,
+  [data-theme="neon-rift"] *::-webkit-scrollbar-corner {
+    background: #101013;
+  }
+}
+
 @layer theme {
   [data-theme="neon-rift"] {
     --rift-bg: #050711;
@@ -13,12 +60,11 @@
     min-height: 100vh;
     color: var(--rift-text);
     background:
-      radial-gradient(circle at 76% 12%, rgba(255, 60, 166, 0.1), transparent 27rem),
-      radial-gradient(circle at 15% 38%, rgba(66, 245, 230, 0.07), transparent 30rem),
-      linear-gradient(rgba(63, 93, 125, 0.055) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(63, 93, 125, 0.055) 1px, transparent 1px),
-      var(--rift-bg);
-    background-size: auto, auto, 48px 48px, 48px 48px, auto;
+      radial-gradient(ellipse at 82% -8%, rgba(255, 60, 166, 0.13), transparent 34rem),
+      radial-gradient(ellipse at -8% 48%, rgba(66, 245, 230, 0.08), transparent 38rem),
+      linear-gradient(116deg, transparent 0 63%, rgba(255, 216, 77, 0.022) 63% 63.35%, transparent 63.35% 74%, rgba(255, 60, 166, 0.02) 74% 74.45%, transparent 74.45%),
+      linear-gradient(180deg, #080a13 0%, var(--rift-bg) 54%, #070910 100%);
+    background-attachment: fixed;
     font-family: "Segoe UI", "Microsoft YaHei UI", "PingFang SC", system-ui, sans-serif;
     letter-spacing: 0.01em;
     overflow-x: clip;
@@ -196,7 +242,7 @@
   [data-theme="neon-rift"] .rift-article-head { width: min(100%, 1050px); margin: 0 auto; }
   [data-theme="neon-rift"] .rift-article-signal { display: flex; justify-content: space-between; padding: 0.65rem 0; border-block: 1px solid var(--rift-line); color: var(--rift-muted); font: 0.58rem ui-monospace, monospace; letter-spacing: 0.12em; }
   [data-theme="neon-rift"] .rift-article-signal span:first-child { color: var(--rift-pink); }
-  [data-theme="neon-rift"] .rift-article-head h1 { max-width: 980px; margin: 2.2rem 0 1.5rem; font-size: clamp(3rem, 8vw, 7rem); line-height: 0.98; letter-spacing: -0.065em; text-wrap: balance; }
+  [data-theme="neon-rift"] .rift-article-head h1 { max-width: 980px; margin: 2.2rem 0 1.5rem; font-size: clamp(2.6rem, 5vw, 4.75rem); line-height: 1.04; letter-spacing: -0.05em; text-wrap: balance; }
   [data-theme="neon-rift"] .rift-article-head > p { max-width: 760px; margin: 0; color: #a8bac1; font-size: clamp(1rem, 1.6vw, 1.22rem); line-height: 1.8; }
   [data-theme="neon-rift"] .rift-article-meta { display: flex; flex-wrap: wrap; gap: 0.6rem 1.5rem; margin: 2rem 0 3rem; color: var(--rift-yellow); font: 0.62rem ui-monospace, monospace; letter-spacing: 0.1em; }
   [data-theme="neon-rift"] .rift-article-cover { position: relative; margin: 0 0 4rem; padding: 10px; border: 1px solid var(--rift-line); clip-path: var(--rift-cut); background: var(--rift-panel); }
@@ -207,9 +253,10 @@
   [data-theme="neon-rift"] .rift-reading-rail i { width: 1px; height: 100%; background: linear-gradient(var(--rift-cyan), var(--rift-pink), transparent); }
   [data-theme="neon-rift"] .rift-reading-rail small { color: var(--rift-cyan); }
 
-  [data-theme="neon-rift"] .toc { position: sticky; top: 108px; max-height: calc(100vh - 132px); padding: 1rem; border-left: 1px solid var(--rift-line); background: rgba(5, 7, 17, 0.72); opacity: 1; visibility: visible; transform: none; pointer-events: auto; }
+  [data-theme="neon-rift"] .toc { position: sticky; top: 108px; max-height: calc(66.667vh - 88px); padding: 1rem; border-left: 1px solid var(--rift-line); background: rgba(5, 7, 17, 0.72); opacity: 1; visibility: visible; transform: none; pointer-events: auto; }
   [data-theme="neon-rift"] .toc-title { margin-bottom: 0.8rem; color: var(--rift-pink); font: 0.6rem ui-monospace, monospace; letter-spacing: 0.16em; }
-  [data-theme="neon-rift"] .toc-links { position: relative; max-height: calc(100vh - 190px); overflow: auto; scrollbar-width: thin; }
+  [data-theme="neon-rift"] .toc-links { position: relative; max-height: calc(66.667vh - 126.667px); overflow: auto; overscroll-behavior: contain; scrollbar-width: none; }
+  [data-theme="neon-rift"] .toc-links::-webkit-scrollbar { width: 0; height: 0; }
   [data-theme="neon-rift"] .toc-link { display: block; padding: 0.6rem 0.7rem 0.6rem 1rem; color: var(--rift-muted); font-size: 0.68rem; line-height: 1.45; }
   [data-theme="neon-rift"] .toc-h3 { padding-left: 1.65rem; font-size: 0.62rem; }
   [data-theme="neon-rift"] .toc-link:hover,
@@ -302,10 +349,10 @@
     [data-theme="neon-rift"] .rift-archive-head { grid-template-columns: 1fr; min-height: 0; padding: 4rem 0 2rem; }
     [data-theme="neon-rift"] .rift-archive-head h1 { font-size: clamp(3.3rem, 18vw, 6rem); }
     [data-theme="neon-rift"] .rift-article { padding-top: 3rem; }
-    [data-theme="neon-rift"] .rift-article-head h1 { font-size: clamp(2.8rem, 13vw, 5rem); }
+    [data-theme="neon-rift"] .rift-article-head h1 { font-size: clamp(2.2rem, 9.5vw, 3.5rem); }
     [data-theme="neon-rift"] .rift-article-grid { display: block; }
     [data-theme="neon-rift"] .toc { position: relative; top: auto; max-height: none; margin-bottom: 2.5rem; border: 1px solid var(--rift-line); clip-path: var(--rift-cut); background: var(--rift-panel); }
-    [data-theme="neon-rift"] .toc-links { max-height: 250px; }
+    [data-theme="neon-rift"] .toc-links { max-height: 10.5rem; }
     [data-theme="neon-rift"] .rift-prose h2 { margin-top: 3.5rem; }
     [data-theme="neon-rift"] .rift-adjacent { grid-template-columns: 1fr; }
     [data-theme="neon-rift"] .rift-footer { grid-template-columns: 1fr; text-align: center; }
@@ -349,11 +396,11 @@
     --rift-line: rgba(252, 238, 10, 0.24);
     --rift-cut: polygon(0 0, calc(100% - 18px) 0, 100% 18px, 100% calc(100% - 7px), calc(100% - 7px) 100%, 15px 100%, 0 calc(100% - 15px));
     background:
-      linear-gradient(112deg, transparent 0 72%, rgba(255, 0, 60, 0.055) 72% 74%, transparent 74%),
-      linear-gradient(rgba(252, 238, 10, 0.045) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(252, 238, 10, 0.045) 1px, transparent 1px),
-      var(--rift-bg);
-    background-size: auto, 56px 56px, 56px 56px, auto;
+      radial-gradient(ellipse at 84% -10%, rgba(255, 0, 60, 0.13), transparent 34rem),
+      radial-gradient(ellipse at -8% 46%, rgba(0, 240, 255, 0.075), transparent 40rem),
+      linear-gradient(116deg, transparent 0 63%, rgba(252, 238, 10, 0.025) 63% 63.35%, transparent 63.35% 74%, rgba(255, 0, 60, 0.022) 74% 74.45%, transparent 74.45%),
+      linear-gradient(180deg, #0e0e12 0%, var(--rift-bg) 52%, #08080a 100%);
+    background-attachment: fixed;
     font-family: "Bahnschrift Condensed", "Arial Narrow", "Segoe UI", "Microsoft YaHei UI", "PingFang SC", system-ui, sans-serif;
   }
 
@@ -364,10 +411,9 @@
 
   [data-theme="neon-rift"] ::selection { color: #0b0b0d; background: var(--rift-yellow); }
   [data-theme="neon-rift"] .rift-scanlines {
-    opacity: 0.08;
-    background:
-      repeating-linear-gradient(180deg, transparent 0 3px, rgba(255, 255, 255, 0.14) 4px),
-      repeating-linear-gradient(90deg, transparent 0 191px, rgba(255, 0, 60, 0.2) 192px);
+    opacity: 0.1;
+    background: repeating-linear-gradient(180deg, transparent 0 3px, rgba(255, 255, 255, 0.12) 4px);
+    mix-blend-mode: soft-light;
   }
 
   [data-theme="neon-rift"] .rift-header {
@@ -781,10 +827,9 @@
     border-left: 1px solid rgba(252, 238, 10, 0.2);
     overflow: hidden;
     background:
-      linear-gradient(90deg, transparent 49.85%, rgba(255, 0, 60, 0.22) 50%, transparent 50.15%),
-      linear-gradient(rgba(252, 238, 10, 0.07) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(252, 238, 10, 0.07) 1px, transparent 1px);
-    background-size: auto, 32px 32px, 32px 32px;
+      radial-gradient(ellipse at 50% 54%, rgba(0, 240, 255, 0.08), transparent 60%),
+      linear-gradient(90deg, transparent 49.85%, rgba(255, 0, 60, 0.2) 50%, transparent 50.15%),
+      linear-gradient(165deg, rgba(252, 238, 10, 0.05), transparent 38% 72%, rgba(0, 240, 255, 0.035));
   }
   [data-theme="neon-rift"] .rift-tower::before,
   [data-theme="neon-rift"] .rift-tower::after {
@@ -1039,10 +1084,9 @@
     display: grid;
     place-items: center;
     background:
-      linear-gradient(90deg, transparent 49.85%, rgba(255, 0, 60, 0.18) 50%, transparent 50.15%),
-      linear-gradient(rgba(252, 238, 10, 0.055) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(252, 238, 10, 0.055) 1px, transparent 1px);
-    background-size: auto, 32px 32px, 32px 32px;
+      radial-gradient(ellipse at 50% 54%, rgba(0, 240, 255, 0.08), transparent 60%),
+      linear-gradient(90deg, transparent 49.85%, rgba(255, 0, 60, 0.2) 50%, transparent 50.15%),
+      linear-gradient(165deg, rgba(252, 238, 10, 0.05), transparent 38% 72%, rgba(0, 240, 255, 0.035));
   }
 
   [data-theme="neon-rift"] .rift-tower::before,

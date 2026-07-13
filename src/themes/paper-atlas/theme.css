@@ -8,6 +8,52 @@
   to { clip-path: inset(0 0 0 0); }
 }
 
+/* A squared editorial scrollbar: parchment track, proofreader-red thumb. */
+@supports not selector(::-webkit-scrollbar) {
+  html:has([data-theme="paper-atlas"]),
+  [data-theme="paper-atlas"] {
+    scrollbar-color: #aa3527 #e8e1d2;
+    scrollbar-width: thin;
+  }
+}
+
+@supports selector(::-webkit-scrollbar) {
+  html:has([data-theme="paper-atlas"])::-webkit-scrollbar,
+  [data-theme="paper-atlas"]::-webkit-scrollbar,
+  [data-theme="paper-atlas"] *::-webkit-scrollbar {
+    width: 13px;
+    height: 13px;
+  }
+
+  html:has([data-theme="paper-atlas"])::-webkit-scrollbar-track,
+  [data-theme="paper-atlas"]::-webkit-scrollbar-track,
+  [data-theme="paper-atlas"] *::-webkit-scrollbar-track {
+    border-left: 1px solid #cfc5b2;
+    background: #e8e1d2;
+  }
+
+  html:has([data-theme="paper-atlas"])::-webkit-scrollbar-thumb,
+  [data-theme="paper-atlas"]::-webkit-scrollbar-thumb,
+  [data-theme="paper-atlas"] *::-webkit-scrollbar-thumb {
+    min-height: 52px;
+    border: 3px solid #e8e1d2;
+    border-radius: 1px;
+    background: #aa3527;
+  }
+
+  html:has([data-theme="paper-atlas"])::-webkit-scrollbar-thumb:hover,
+  [data-theme="paper-atlas"]::-webkit-scrollbar-thumb:hover,
+  [data-theme="paper-atlas"] *::-webkit-scrollbar-thumb:hover {
+    background: #3559a8;
+  }
+
+  html:has([data-theme="paper-atlas"])::-webkit-scrollbar-corner,
+  [data-theme="paper-atlas"]::-webkit-scrollbar-corner,
+  [data-theme="paper-atlas"] *::-webkit-scrollbar-corner {
+    background: #e8e1d2;
+  }
+}
+
 @scope ([data-theme="paper-atlas"]) {
   :scope {
     --paper: #f4f0e6;
@@ -295,7 +341,7 @@
   .toc { position: sticky; top: 110px; display: grid; max-height: calc(100vh - 130px); gap: 0.6rem; opacity: 0; pointer-events: none; transform: translateX(-8px); transition: opacity 180ms ease, transform 180ms ease; visibility: hidden; }
   .toc.is-visible { opacity: 1; pointer-events: auto; transform: none; visibility: visible; }
   .toc-title { color: var(--red); font-family: var(--mono); font-size: 0.68rem; letter-spacing: 0.08em; text-transform: uppercase; }
-  .toc-links { position: relative; display: grid; max-height: calc(100vh - 190px); overflow: auto; padding-left: 0.8rem; border-left: 1px solid var(--line); scrollbar-width: thin; }
+  .toc-links { position: relative; display: grid; max-height: calc(100vh - 190px); overflow: auto; padding-left: 0.8rem; border-left: 1px solid var(--line); }
   .toc-indicator { position: absolute; left: -1px; width: 3px; background: var(--red); transition: transform 220ms ease, height 180ms ease; }
   .toc-link { padding: 0.35rem 0.55rem; color: var(--ink-faint); font-size: 0.72rem; line-height: 1.4; }
   .toc-link:hover, .toc-link.is-active { color: var(--ink); }
