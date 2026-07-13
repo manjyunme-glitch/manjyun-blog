@@ -15,8 +15,17 @@ import {
   contentHref
 } from "@/lib/content/content-types";
 import type { PostStatus, PostSummary } from "@/types/blog";
+import { AdminNotice, ConfirmDialog } from "@/components/admin/AdminFeedback";
 
 type BulkAction = "publish" | "unpublish" | "trash" | "restore" | "delete";
+
+type Confirmation = {
+  title: string;
+  description: string;
+  confirmLabel: string;
+  danger: boolean;
+  run(): Promise<void>;
+};
 
 type StatusCounts = {
   all: number;
@@ -89,6 +98,9 @@ export function AdminContentTable({
   const [pendingId, setPendingId] = useState<number | null>(null);
   const [bulkPending, setBulkPending] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set());
+  const [message, setMessage] = useState("");
+  const [messageKind, setMessageKind] = useState<"success" | "error">("success");
+  const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
   const visibleIds = useMemo(() => posts.map((post) => post.id), [posts]);
   const visibleKey = visibleIds.join(",");
   const allVisibleSelected =
@@ -115,15 +127,8 @@ export function AdminContentTable({
     setSelectedIds(checked ? new Set(visibleIds) : new Set());
   }
 
-  async function runAction(id: number, action: "publish" | "unpublish" | "trash" | "restore") {
-    const confirmMessage =
-      action === "trash"
-        ? "确定移到回收站？公开页面会立即隐藏。"
-        : action === "unpublish"
-          ? "确定取消发布？内容会回到草稿。"
-          : "";
-    if (confirmMessage && !window.confirm(confirmMessage)) return;
-
+  async function executeAction(id: number, action: "publish" | "unpublish" | "trash" | "restore") {
+    setMessage("");
     setPendingId(id);
     try {
       const response = await fetch(`/api/admin/posts/${id}`, {
@@ -133,17 +138,34 @@ export function AdminContentTable({
       });
       if (!response.ok) {
         const data = (await response.json().catch(() => null)) as { error?: string } | null;
-        window.alert(data?.error ?? "操作失败");
+        setMessageKind("error");
+        setMessage(data?.error ?? "操作失败");
         return;
       }
+      setMessageKind("success");
+      setMessage(action === "publish" ? "内容已发布。" : action === "restore" ? "内容已恢复为草稿。" : action === "trash" ? "内容已移到回收站。" : "内容已取消发布。");
       router.refresh();
     } finally {
       setPendingId(null);
     }
   }
 
-  async function deletePermanently(id: number) {
-    if (!window.confirm("确定永久删除？这个操作不能撤销。")) return;
+  function runAction(id: number, title: string, action: "publish" | "unpublish" | "trash" | "restore") {
+    if (action === "trash" || action === "unpublish") {
+      setConfirmation({
+        title: action === "trash" ? `把“${title}”移到回收站？` : `取消发布“${title}”？`,
+        description: action === "trash" ? "公开页面会立即隐藏，之后仍可从回收站恢复。" : "公开页面会立即隐藏，内容将回到草稿状态。",
+        confirmLabel: action === "trash" ? "移到回收站" : "取消发布",
+        danger: action === "trash",
+        run: () => executeAction(id, action)
+      });
+      return;
+    }
+    void executeAction(id, action);
+  }
+
+  async function executePermanentDelete(id: number) {
+    setMessage("");
     setPendingId(id);
     try {
       const response = await fetch(`/api/admin/posts/${id}?permanent=1`, {
@@ -151,28 +173,46 @@ export function AdminContentTable({
       });
       if (!response.ok) {
         const data = (await response.json().catch(() => null)) as { error?: string } | null;
-        window.alert(data?.error ?? "删除失败");
+        setMessageKind("error");
+        setMessage(data?.error ?? "删除失败");
         return;
       }
+      setMessageKind("success");
+      setMessage("内容已永久删除。");
       router.refresh();
     } finally {
       setPendingId(null);
     }
   }
 
+  function deletePermanently(id: number, title: string) {
+    setConfirmation({
+      title: `永久删除“${title}”？`,
+      description: "正文、标签关系和版本历史都会被永久删除，这个操作不能撤销。",
+      confirmLabel: "永久删除",
+      danger: true,
+      run: () => executePermanentDelete(id)
+    });
+  }
+
   async function runBulkAction(action: BulkAction) {
     const ids = Array.from(selectedIds);
     if (!ids.length) return;
-    const confirmMessage =
-      action === "delete"
-        ? `确定永久删除选中的 ${ids.length} 项？这个操作不能撤销。`
-        : action === "trash"
-          ? `确定把选中的 ${ids.length} 项移到回收站？公开页面会立即隐藏。`
-          : action === "unpublish"
-            ? `确定取消发布选中的 ${ids.length} 项？`
-            : "";
-    if (confirmMessage && !window.confirm(confirmMessage)) return;
+    if (["delete", "trash", "unpublish"].includes(action)) {
+      setConfirmation({
+        title: action === "delete" ? `永久删除 ${ids.length} 项内容？` : action === "trash" ? `把 ${ids.length} 项内容移到回收站？` : `取消发布 ${ids.length} 项内容？`,
+        description: action === "delete" ? "所选内容及版本历史都会永久删除，无法撤销。" : "所选公开内容会立即隐藏。",
+        confirmLabel: action === "delete" ? "永久删除" : action === "trash" ? "移到回收站" : "取消发布",
+        danger: action === "delete" || action === "trash",
+        run: () => executeBulkAction(action, ids)
+      });
+      return;
+    }
+    await executeBulkAction(action, ids);
+  }
 
+  async function executeBulkAction(action: BulkAction, ids: number[]) {
+    setMessage("");
     setBulkPending(true);
     try {
       const response = await fetch("/api/admin/posts", {
@@ -182,10 +222,13 @@ export function AdminContentTable({
       });
       if (!response.ok) {
         const data = (await response.json().catch(() => null)) as { error?: string } | null;
-        window.alert(data?.error ?? "批量操作失败");
+        setMessageKind("error");
+        setMessage(data?.error ?? "批量操作失败");
         return;
       }
       setSelectedIds(new Set());
+      setMessageKind("success");
+      setMessage(`已处理 ${ids.length} 项内容。`);
       router.refresh();
     } finally {
       setBulkPending(false);
@@ -194,6 +237,7 @@ export function AdminContentTable({
 
   return (
     <section className="content-workbench">
+      <AdminNotice message={message} kind={messageKind} />
       <form className="content-toolbar" action="/admin/posts" method="get" role="search">
         {currentType !== "all" ? <input type="hidden" name="type" value={currentType} /> : null}
         {currentStatus !== "all" ? <input type="hidden" name="status" value={currentStatus} /> : null}
@@ -296,7 +340,7 @@ export function AdminContentTable({
           <tbody>
             {posts.map((post) => (
               <tr key={post.id} className={selectedIds.has(post.id) ? "is-selected" : ""}>
-                <td className="check-cell">
+                <td className="check-cell" data-label="选择">
                   <input
                     type="checkbox"
                     aria-label={`选择 ${post.title}`}
@@ -305,19 +349,19 @@ export function AdminContentTable({
                     onChange={(event) => toggleSelected(post.id, event.currentTarget.checked)}
                   />
                 </td>
-                <td>
+                <td data-label="标题">
                   <Link className="content-title" href={`/admin/posts/${post.id}`}>
                     <strong>{post.title}</strong>
                     <span>{post.excerpt || "暂无摘要"}</span>
                   </Link>
                 </td>
-                <td>
+                <td data-label="状态">
                   <span className={`status-pill ${post.status}`}>{statusLabels[post.status]}</span>
                 </td>
-                <td>
+                <td data-label="类型">
                   <span className="type-pill">{CONTENT_TYPE_DEFINITIONS[post.type].label}</span>
                 </td>
-                <td>
+                <td data-label="标签">
                   {post.tags?.length ? (
                     <div className="content-tags">
                       {post.tags.map((tag) => (
@@ -330,13 +374,13 @@ export function AdminContentTable({
                     <span className="muted-cell">-</span>
                   )}
                 </td>
-                <td>{formatDate(post.updatedAt)}</td>
-                <td>
-                  <code className="path-code">
+                <td data-label="更新">{formatDate(post.updatedAt)}</td>
+                <td data-label="路径">
+                  <Link className="path-code" href={contentHref(post.type, post.slug)} target="_blank" rel="noreferrer">
                     {contentHref(post.type, post.slug)}
-                  </code>
+                  </Link>
                 </td>
-                <td>
+                <td data-label="操作">
                   <div className="row-actions">
                     {post.status !== "trashed" ? (
                       <Link className="row-action" href={`/admin/posts/${post.id}`}>
@@ -344,12 +388,15 @@ export function AdminContentTable({
                       </Link>
                     ) : null}
                     {post.status === "published" ? (
+                      <Link className="row-action" href={contentHref(post.type, post.slug)} target="_blank" rel="noreferrer">查看</Link>
+                    ) : null}
+                    {post.status === "published" ? (
                       <>
                         <button
                           className="row-action primary-action"
                           type="button"
                           disabled={pendingId === post.id}
-                          onClick={() => void runAction(post.id, "unpublish")}
+                          onClick={() => runAction(post.id, post.title, "unpublish")}
                         >
                           取消发布
                         </button>
@@ -357,7 +404,7 @@ export function AdminContentTable({
                           className="row-action danger-action"
                           type="button"
                           disabled={pendingId === post.id}
-                          onClick={() => void runAction(post.id, "trash")}
+                          onClick={() => runAction(post.id, post.title, "trash")}
                         >
                           移到回收站
                         </button>
@@ -369,7 +416,7 @@ export function AdminContentTable({
                           className="row-action primary-action"
                           type="button"
                           disabled={pendingId === post.id}
-                          onClick={() => void runAction(post.id, "publish")}
+                          onClick={() => runAction(post.id, post.title, "publish")}
                         >
                           发布
                         </button>
@@ -377,7 +424,7 @@ export function AdminContentTable({
                           className="row-action danger-action"
                           type="button"
                           disabled={pendingId === post.id}
-                          onClick={() => void runAction(post.id, "trash")}
+                          onClick={() => runAction(post.id, post.title, "trash")}
                         >
                           移到回收站
                         </button>
@@ -389,7 +436,7 @@ export function AdminContentTable({
                           className="row-action primary-action"
                           type="button"
                           disabled={pendingId === post.id}
-                          onClick={() => void runAction(post.id, "restore")}
+                          onClick={() => runAction(post.id, post.title, "restore")}
                         >
                           恢复
                         </button>
@@ -397,7 +444,7 @@ export function AdminContentTable({
                           className="row-action danger-action"
                           type="button"
                           disabled={pendingId === post.id}
-                          onClick={() => void deletePermanently(post.id)}
+                          onClick={() => deletePermanently(post.id, post.title)}
                         >
                           永久删除
                         </button>
@@ -444,6 +491,20 @@ export function AdminContentTable({
           <span className="btn ghost" aria-disabled="true">下一页</span>
         )}
       </nav>
+      <ConfirmDialog
+        open={Boolean(confirmation)}
+        title={confirmation?.title ?? ""}
+        description={confirmation?.description ?? ""}
+        confirmLabel={confirmation?.confirmLabel ?? "确认"}
+        danger={confirmation?.danger}
+        pending={bulkPending || pendingId !== null}
+        onCancel={() => setConfirmation(null)}
+        onConfirm={() => {
+          const request = confirmation;
+          if (!request) return;
+          void request.run().finally(() => setConfirmation(null));
+        }}
+      />
     </section>
   );
 }

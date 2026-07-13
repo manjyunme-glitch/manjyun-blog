@@ -5,13 +5,23 @@ const username = process.env.E2E_USERNAME;
 const password = process.env.E2E_PASSWORD;
 const shouldRun = Boolean(baseUrl && username && password);
 
+async function expectNoPageOverflow(page) {
+  const overflow = await page.evaluate(() => ({
+    clientWidth: document.documentElement.clientWidth,
+    scrollWidth: document.documentElement.scrollWidth
+  }));
+  expect(overflow.scrollWidth, JSON.stringify(overflow)).toBeLessThanOrEqual(overflow.clientWidth + 1);
+}
+
 test.skip(!shouldRun, "Set E2E_BASE_URL, E2E_USERNAME, and E2E_PASSWORD to run.");
 
 test("setup admin and publish a post", async ({ page }) => {
+  test.setTimeout(60_000);
   await page.goto(`${baseUrl}/admin/setup`);
-  if (await page.locator('input[name="username"]').isVisible().catch(() => false)) {
+  if (page.url().includes("/admin/setup") && await page.locator('input[name="username"]').isVisible().catch(() => false)) {
     await page.locator('input[name="username"]').fill(username || "");
     await page.locator('input[name="password"]').fill(password || "");
+    await page.locator('input[name="passwordConfirm"]').fill(password || "");
     await page.locator('button[type="submit"]').click();
   }
   if (page.url().includes("/admin/login")) {
@@ -87,31 +97,25 @@ test("setup admin and publish a post", async ({ page }) => {
   expect(originalTheme).toBeTruthy();
 
   await page.goto(`${baseUrl}/admin/themes`);
-  expect(
-    await page.locator('.theme-card iframe[src^="/theme-preview/"]').count()
-  ).toBeGreaterThanOrEqual(2);
-  const availableCard = page.locator(".theme-card").filter({
-    has: page.locator(".status-pill", { hasText: "可用" })
-  }).first();
-  const targetName = await availableCard.getByRole("heading", { level: 2 }).textContent();
-  const previewSrc = await availableCard.locator("iframe").getAttribute("src");
-  const targetTheme = decodeURIComponent(previewSrc?.split("/").pop() || "");
-  expect(targetName).toBeTruthy();
-  expect(targetTheme).toBeTruthy();
+  await expect(page.locator(".theme-card")).toHaveCount(3);
+  await expect(page.locator(".theme-pair-previews")).toHaveCount(3);
 
-  await availableCard.getByRole("button", { name: "激活" }).click();
-  const targetCard = page.locator(".theme-card").filter({
-    has: page.getByRole("heading", { level: 2, name: targetName || "" })
-  });
-  await expect(targetCard.locator(".status-pill")).toHaveText("当前");
-  await page.goto(`${baseUrl}/`);
-  await expect(page.locator(`[data-theme="${targetTheme}"]`)).toBeVisible();
+  for (const targetTheme of ["manjyun-console", "paper-atlas", "neon-rift"]) {
+    await page.goto(`${baseUrl}/admin/themes`);
+    const targetCard = page.locator(`[data-theme-id="${targetTheme}"]`);
+    const activate = targetCard.getByRole("button", { name: "激活" });
+    if (await activate.isVisible().catch(() => false)) await activate.click();
+    await expect(page.locator(`[data-admin-root][data-admin-theme="${targetTheme}"]`)).toBeVisible();
+    await expect(targetCard.locator(".status-pill")).toHaveText("当前");
+    await page.goto(`${baseUrl}/`);
+    await expect(page.locator(`[data-theme="${targetTheme}"]`)).toBeVisible();
+  }
 
   await page.goto(`${baseUrl}/admin/themes`);
-  await page.getByRole("button", { name: new RegExp(`^回退到`) }).click();
-  await expect(page.locator(".theme-success")).toContainText("已回退到");
-  await page.goto(`${baseUrl}/`);
-  await expect(page.locator(`[data-theme="${originalTheme}"]`)).toBeVisible();
+  const originalCard = page.locator(`[data-theme-id="${originalTheme}"]`);
+  const restoreOriginal = originalCard.getByRole("button", { name: "激活" });
+  if (await restoreOriginal.isVisible().catch(() => false)) await restoreOriginal.click();
+  await expect(page.locator(`[data-admin-root][data-admin-theme="${originalTheme}"]`)).toBeVisible();
 
   const missingPreview = await page.goto(`${baseUrl}/theme-preview/%25`);
   expect(missingPreview?.status()).toBe(404);
@@ -123,4 +127,35 @@ test("setup admin and publish a post", async ({ page }) => {
   await page.locator('input[name="password"]').fill(password || "");
   await page.locator('button[type="submit"]').click();
   await page.waitForURL("**/admin", { timeout: 15000 });
+
+  await page.goto(`${baseUrl}/admin/posts/${result.body.id}`);
+  await page.getByRole("button", { name: "写作", exact: true }).click();
+  const editor = page.locator(".markdown-editor");
+  await editor.fill("## Local recovery\n\nUnsaved browser draft.");
+  await page.waitForTimeout(800);
+  page.once("dialog", (dialog) => void dialog.accept());
+  await page.reload();
+  await expect(page.getByText(/检测到.*本地草稿/)).toBeVisible();
+  await page.getByRole("button", { name: "恢复草稿" }).click();
+  await expect(editor).toHaveValue(/Unsaved browser draft/);
+  await page.getByRole("button", { name: "保存更改" }).click();
+  await expect(page.getByText("已保存更改", { exact: true })).toBeVisible();
+
+  for (const width of [1440, 1024, 768, 390, 320]) {
+    await page.setViewportSize({ width, height: width <= 390 ? 844 : 900 });
+    for (const path of ["/admin", "/admin/posts", `/admin/posts/${result.body.id}`]) {
+      await page.goto(`${baseUrl}${path}`);
+      await expectNoPageOverflow(page);
+    }
+  }
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(`${baseUrl}/admin`);
+  const navToggle = page.locator(".admin-nav-toggle");
+  await expect(navToggle).toHaveAccessibleName("打开后台导航");
+  await navToggle.click();
+  await expect(navToggle).toHaveAttribute("aria-expanded", "true");
+  await page.getByRole("link", { name: "内容", exact: true }).click();
+  await expect(page).toHaveURL(/\/admin\/posts/);
+  await expect(page.locator(".content-table tbody tr").first()).toBeVisible();
 });

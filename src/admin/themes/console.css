@@ -1,0 +1,22 @@
+@scope ([data-admin-root]) {
+  :scope[data-admin-theme="manjyun-console"] {
+    --admin-heading: var(--mono);
+    --admin-body: var(--sans);
+    --admin-radius: 8px;
+    color-scheme: dark;
+  }
+
+  :scope[data-admin-theme="manjyun-console"] .admin-shell {
+    background:
+      linear-gradient(90deg, rgba(255, 255, 255, 0.024) 1px, transparent 1px) 0 0 / 64px 64px,
+      var(--admin-bg);
+  }
+
+  :scope[data-admin-theme="manjyun-console"] .admin-theme-decoration-console {
+    display: flex;
+  }
+
+  :scope[data-admin-theme="manjyun-console"] .admin-auth-art-console {
+    display: grid;
+  }
+}

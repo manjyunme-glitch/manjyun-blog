@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { setupAction } from "@/app/admin/actions";
 import { isSetupComplete } from "@/lib/db/queries";
+import { AdminThemeChrome } from "@/components/admin/AdminThemeChrome";
 
 export const dynamic = "force-dynamic";
 
@@ -15,18 +16,24 @@ export default async function SetupPage({
   return (
     <main className="auth-page">
       <form className="auth-card form-grid" action={setupAction}>
+        <AdminThemeChrome slot="AuthDecoration" />
         <div>
-          <h1 className="admin-title">首次设置</h1>
-          <p className="admin-subtitle">创建唯一管理员账号。完成后 setup 会自动关闭。</p>
+          <h1 className="admin-title">初始化 ManJyun Admin</h1>
+          <p className="admin-subtitle">创建唯一管理员账号；完成后初始化入口会自动关闭。</p>
         </div>
-        {error ? <p className="error-text">{decodeURIComponent(error)}</p> : null}
+        {error ? <p className="admin-notice error" role="alert" tabIndex={-1}>{decodeURIComponent(error)}</p> : null}
         <div className="field">
-          <label>用户名</label>
-          <input className="input" name="username" autoComplete="username" required />
+          <label htmlFor="setup-username">用户名</label>
+          <input id="setup-username" className="input" name="username" autoComplete="username" autoFocus required />
         </div>
         <div className="field">
-          <label>密码</label>
-          <input className="input" name="password" type="password" autoComplete="new-password" minLength={8} required />
+          <label htmlFor="setup-password">密码</label>
+          <input id="setup-password" className="input" name="password" type="password" autoComplete="new-password" minLength={8} required aria-describedby="setup-password-hint" />
+          <p className="field-hint" id="setup-password-hint">至少 8 位，建议使用独立于其他服务的密码。</p>
+        </div>
+        <div className="field">
+          <label htmlFor="setup-password-confirm">确认密码</label>
+          <input id="setup-password-confirm" className="input" name="passwordConfirm" type="password" autoComplete="new-password" minLength={8} required />
         </div>
         <button className="btn primary" type="submit">
           创建管理员

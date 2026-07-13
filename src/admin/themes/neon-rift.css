@@ -1,0 +1,80 @@
+@scope ([data-admin-root]) {
+  :scope[data-admin-theme="neon-rift"] {
+    --accent-dim: rgba(252, 238, 10, 0.1);
+    --accent-soft: rgba(252, 238, 10, 0.1);
+    --accent-line: rgba(252, 238, 10, 0.42);
+    --green-dim: rgba(80, 240, 176, 0.1);
+    --admin-heading: "Arial Narrow", "Roboto Condensed", Impact, sans-serif;
+    --admin-body: "Noto Sans SC", "Microsoft YaHei UI", sans-serif;
+    --admin-radius: 2px;
+    --radius: var(--admin-radius);
+    color-scheme: dark;
+  }
+
+  :scope[data-admin-theme="neon-rift"] .admin-shell,
+  :scope[data-admin-theme="neon-rift"] .auth-page {
+    background:
+      linear-gradient(rgba(252, 238, 10, 0.035) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(252, 238, 10, 0.035) 1px, transparent 1px),
+      var(--admin-bg);
+    background-size: 42px 42px;
+  }
+
+  :scope[data-admin-theme="neon-rift"] .admin-sidebar {
+    border-right: 1px solid rgba(252, 238, 10, 0.3);
+    border-top: 4px solid var(--admin-accent);
+    background: rgba(12, 12, 16, 0.95);
+  }
+
+  :scope[data-admin-theme="neon-rift"] :where(.admin-title, .section-title, .settings-section-head h2, .theme-toolbar h2, .link-editor-head h3) {
+    font-family: var(--admin-heading);
+    font-weight: 900;
+    letter-spacing: 0.035em;
+    text-transform: uppercase;
+  }
+
+  :scope[data-admin-theme="neon-rift"] .admin-title {
+    font-size: 1.55rem;
+  }
+
+  :scope[data-admin-theme="neon-rift"] :where(.admin-panel, .auth-card, .editor-panel, .media-card, .settings-card, .content-table-wrap) {
+    border-color: rgba(252, 238, 10, 0.2);
+    background: rgba(16, 16, 21, 0.94);
+    box-shadow: 4px 4px 0 rgba(255, 49, 95, 0.07);
+  }
+
+  :scope[data-admin-theme="neon-rift"] :where(.admin-panel, .settings-card, .media-card, .content-table-wrap) {
+    clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 0 100%);
+  }
+
+  :scope[data-admin-theme="neon-rift"] :where(.input, .textarea, .select, .markdown-editor, .preview-pane) {
+    clip-path: none;
+    background: #0e0e13;
+  }
+
+  :scope[data-admin-theme="neon-rift"] .admin-menu a.is-active,
+  :scope[data-admin-theme="neon-rift"] .btn.primary,
+  :scope[data-admin-theme="neon-rift"] .row-action.primary-action {
+    border-color: var(--admin-accent);
+    background: var(--admin-accent);
+    color: #0b0b0d;
+    box-shadow: 3px 3px 0 rgba(255, 49, 95, 0.75);
+  }
+
+  :scope[data-admin-theme="neon-rift"] .section-title::before {
+    content: "CH::";
+    color: var(--admin-accent);
+  }
+
+  :scope[data-admin-theme="neon-rift"] .admin-theme-decoration-neon {
+    display: flex;
+  }
+
+  :scope[data-admin-theme="neon-rift"] .admin-auth-art-neon {
+    display: grid;
+  }
+
+  :scope[data-admin-theme="neon-rift"] .status-pill.published {
+    color: var(--admin-green);
+  }
+}

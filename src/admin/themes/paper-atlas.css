@@ -1,0 +1,89 @@
+@scope ([data-admin-root]) {
+  :scope[data-admin-theme="paper-atlas"] {
+    --accent-dim: rgba(183, 67, 52, 0.1);
+    --accent-soft: rgba(183, 67, 52, 0.1);
+    --accent-line: rgba(183, 67, 52, 0.34);
+    --green-dim: rgba(57, 116, 85, 0.1);
+    --admin-heading: Georgia, "Times New Roman", "Noto Serif SC", serif;
+    --admin-body: "Noto Sans SC", "Microsoft YaHei UI", sans-serif;
+    --admin-radius: 3px;
+    --radius: var(--admin-radius);
+    color-scheme: light;
+    font-family: var(--admin-body);
+  }
+
+  :scope[data-admin-theme="paper-atlas"] ::selection {
+    background: var(--admin-accent);
+    color: #fffdf7;
+  }
+
+  :scope[data-admin-theme="paper-atlas"] .admin-shell,
+  :scope[data-admin-theme="paper-atlas"] .auth-page {
+    background:
+      repeating-linear-gradient(0deg, transparent 0 5px, rgba(83, 68, 48, 0.022) 6px),
+      var(--admin-bg);
+  }
+
+  :scope[data-admin-theme="paper-atlas"] .admin-sidebar {
+    border-right-color: var(--admin-border-strong);
+    background: rgba(255, 253, 247, 0.93);
+    box-shadow: 6px 0 22px rgba(64, 50, 34, 0.05);
+  }
+
+  :scope[data-admin-theme="paper-atlas"] :where(.admin-title, .section-title, .settings-section-head h2, .theme-toolbar h2, .link-editor-head h3) {
+    font-family: var(--admin-heading);
+    letter-spacing: -0.025em;
+    text-transform: none;
+  }
+
+  :scope[data-admin-theme="paper-atlas"] .admin-title {
+    font-size: 1.65rem;
+  }
+
+  :scope[data-admin-theme="paper-atlas"] .section-title {
+    color: var(--admin-text);
+    font-size: 1rem;
+    letter-spacing: -0.01em;
+  }
+
+  :scope[data-admin-theme="paper-atlas"] .section-title::before {
+    content: "§ ";
+    color: var(--admin-accent);
+  }
+
+  :scope[data-admin-theme="paper-atlas"] :where(.admin-panel, .auth-card, .editor-panel, .media-card, .settings-card, .content-table-wrap) {
+    border-color: var(--admin-border);
+    background: rgba(255, 253, 247, 0.94);
+    box-shadow: 0 8px 24px rgba(65, 49, 31, 0.045);
+  }
+
+  :scope[data-admin-theme="paper-atlas"] :where(.input, .textarea, .select, .markdown-editor, .preview-pane) {
+    background: #fffefa;
+    color: var(--admin-text);
+  }
+
+  :scope[data-admin-theme="paper-atlas"] .admin-menu a.is-active {
+    border-left: 3px solid var(--admin-accent);
+    border-color: var(--admin-accent);
+    background: rgba(183, 67, 52, 0.08);
+  }
+
+  :scope[data-admin-theme="paper-atlas"] .btn.primary,
+  :scope[data-admin-theme="paper-atlas"] .row-action.primary-action {
+    border-color: var(--admin-accent);
+    background: var(--admin-accent);
+    color: #fffdf7;
+  }
+
+  :scope[data-admin-theme="paper-atlas"] .admin-theme-decoration-paper {
+    display: flex;
+  }
+
+  :scope[data-admin-theme="paper-atlas"] .admin-auth-art-paper {
+    display: grid;
+  }
+
+  :scope[data-admin-theme="paper-atlas"] .status-pill.published {
+    color: var(--admin-green);
+  }
+}

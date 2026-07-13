@@ -9,9 +9,21 @@ import {
   getContentTypeDefinition
 } from "@/lib/content/content-types";
 import { COMMON_POST_TAGS, hasTag, toggleTag } from "@/lib/admin/tags";
+import {
+  classifyEditorDraft,
+  clearEditorDraft,
+  createEditorDraftSnapshot,
+  editorDraftStorageKey,
+  readEditorDraft,
+  writeEditorDraft,
+  type DraftRecoveryKind,
+  type EditorDraftSnapshot
+} from "@/lib/admin/editor-draft";
 import type { PostRevision, PostStatus, PostType, PostWithTags } from "@/types/blog";
+import { ConfirmDialog } from "@/components/admin/AdminFeedback";
 
 type RevisionFilter = "all" | Extract<PostStatus, "published" | "draft">;
+type EditorViewMode = "write" | "split" | "preview";
 
 type Draft = {
   id?: number;
@@ -75,13 +87,27 @@ export function AdminEditor({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const pendingRef = useRef(false);
   const dirtyRef = useRef(false);
+  const serverDraftRef = useRef<Draft>(draftFromPost(post));
+  const confirmResolverRef = useRef<((confirmed: boolean) => void) | null>(null);
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState("");
   const [preview, setPreview] = useState("");
+  const [previewState, setPreviewState] = useState<"loading" | "ready" | "error">("loading");
   const [helpOpen, setHelpOpen] = useState(false);
   const [revisionOpen, setRevisionOpen] = useState(false);
   const [draft, setDraft] = useState<Draft>(() => draftFromPost(post));
   const [isDirty, setIsDirty] = useState(false);
+  const [viewMode, setViewMode] = useState<EditorViewMode>("split");
+  const [recovery, setRecovery] = useState<{
+    kind: Exclude<DraftRecoveryKind, "none">;
+    snapshot: EditorDraftSnapshot<Draft>;
+  } | null>(null);
+  const [confirmation, setConfirmation] = useState<{
+    title: string;
+    description: string;
+    confirmLabel: string;
+    danger: boolean;
+  } | null>(null);
   const [revisionItems, setRevisionItems] = useState<PostRevision[]>(revisions);
   const [revisionFilter, setRevisionFilter] = useState<RevisionFilter>("all");
   const [selectedRevisionId, setSelectedRevisionId] = useState<number | null>(
@@ -94,19 +120,76 @@ export function AdminEditor({
   );
 
   useEffect(() => {
+    const controller = new AbortController();
+    setPreviewState("loading");
     const timer = window.setTimeout(async () => {
-      const response = await fetch("/api/admin/preview", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ markdown: draft.markdown })
-      });
-      if (response.ok) {
+      try {
+        const response = await fetch("/api/admin/preview", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ markdown: draft.markdown }),
+          signal: controller.signal
+        });
+        if (!response.ok) {
+          setPreviewState("error");
+          return;
+        }
         const data = (await response.json()) as { html: string };
         setPreview(data.html);
+        setPreviewState("ready");
+      } catch (error) {
+        if ((error as Error).name !== "AbortError") setPreviewState("error");
       }
     }, 220);
-    return () => window.clearTimeout(timer);
+    return () => {
+      controller.abort();
+      window.clearTimeout(timer);
+    };
   }, [draft.markdown]);
+
+  useEffect(() => {
+    try {
+      const stored = window.localStorage.getItem("manjyun:admin-editor:view-mode");
+      if (stored === "write" || stored === "split" || stored === "preview") {
+        setViewMode(stored);
+        return;
+      }
+    } catch {
+      // Local preferences and recovery are optional enhancements.
+    }
+    if (window.matchMedia("(max-width: 860px)").matches) {
+      setViewMode("write");
+    }
+  }, []);
+
+  useEffect(() => {
+    const snapshot = readEditorDraft<Draft>(
+      window.localStorage,
+      editorDraftStorageKey(post?.id)
+    );
+    const kind = classifyEditorDraft(
+      snapshot,
+      serverDraftRef.current,
+      post?.updatedAt ?? null
+    );
+    if (snapshot && kind !== "none") setRecovery({ kind, snapshot });
+  }, [post?.id, post?.updatedAt]);
+
+  useEffect(() => {
+    if (!isDirty) return;
+    const timer = window.setTimeout(() => {
+      writeEditorDraft(
+        window.localStorage,
+        editorDraftStorageKey(draft.id ?? post?.id),
+        createEditorDraftSnapshot({
+          draft,
+          postId: draft.id ?? post?.id ?? null,
+          sourceUpdatedAt: post?.updatedAt ?? null
+        })
+      );
+    }, 600);
+    return () => window.clearTimeout(timer);
+  }, [draft, isDirty, post?.id, post?.updatedAt]);
 
   useEffect(() => {
     setRevisionItems(revisions);
@@ -166,8 +249,67 @@ export function AdminEditor({
     setIsDirty(true);
   }
 
-  function confirmLeave() {
-    return !dirtyRef.current || window.confirm("还有未保存的修改，确定离开编辑器？");
+  function requestConfirmation(input: {
+    title: string;
+    description: string;
+    confirmLabel: string;
+    danger?: boolean;
+  }) {
+    return new Promise<boolean>((resolve) => {
+      confirmResolverRef.current = resolve;
+      setConfirmation({ ...input, danger: Boolean(input.danger) });
+    });
+  }
+
+  function finishConfirmation(confirmed: boolean) {
+    confirmResolverRef.current?.(confirmed);
+    confirmResolverRef.current = null;
+    setConfirmation(null);
+  }
+
+  function confirmLeaveAndNavigate() {
+    if (!dirtyRef.current) {
+      router.push(backHref);
+      return;
+    }
+    void requestConfirmation({
+      title: "放弃未保存的修改？",
+      description: "当前修改已保存在浏览器本地，离开后可回来恢复，但尚未写入服务器。",
+      confirmLabel: "离开编辑器",
+      danger: true
+    }).then((confirmed) => {
+      if (confirmed) router.push(backHref);
+    });
+  }
+
+  function changeViewMode(mode: EditorViewMode) {
+    setViewMode(mode);
+    try {
+      window.localStorage.setItem("manjyun:admin-editor:view-mode", mode);
+    } catch {
+      // View preference is optional.
+    }
+  }
+
+  function recoverLocalDraft() {
+    if (!recovery) return;
+    setDraft(recovery.snapshot.draft);
+    dirtyRef.current = true;
+    setIsDirty(true);
+    setMessage(
+      recovery.kind === "stale"
+        ? "已载入基于旧服务器版本的本地草稿，请检查后再保存。"
+        : "已恢复本地草稿。"
+    );
+    setRecovery(null);
+  }
+
+  function discardLocalDraft() {
+    clearEditorDraft(
+      window.localStorage,
+      editorDraftStorageKey(draft.id ?? post?.id)
+    );
+    setRecovery(null);
   }
 
   async function runPending(fallbackMessage: string, task: () => Promise<void>) {
@@ -208,6 +350,8 @@ export function AdminEditor({
       setDraft((current) => ({ ...current, id: data.id, slug: data.slug || current.slug, status }));
       dirtyRef.current = false;
       setIsDirty(false);
+      clearEditorDraft(window.localStorage, editorDraftStorageKey(draft.id ?? post?.id));
+      if (wasNew) clearEditorDraft(window.localStorage, editorDraftStorageKey(null));
       setMessage(successMessage ?? (status === "published" ? "已发布" : "已保存草稿"));
       if (wasNew) {
         window.location.assign(`/admin/posts/${data.id}`);
@@ -218,7 +362,14 @@ export function AdminEditor({
   }
 
   async function deletePost() {
-    if (!draft.id || !window.confirm("确定永久删除？这个操作不能撤销。")) return;
+    if (!draft.id) return;
+    const confirmed = await requestConfirmation({
+      title: `永久删除“${draft.title}”？`,
+      description: "正文、标签关系和版本历史都会被永久删除，这个操作不能撤销。",
+      confirmLabel: "永久删除",
+      danger: true
+    });
+    if (!confirmed) return;
     await runPending("删除失败", async () => {
       const response = await fetch(`${endpoint}?permanent=1`, { method: "DELETE" });
       if (!response.ok) {
@@ -227,19 +378,24 @@ export function AdminEditor({
       }
       dirtyRef.current = false;
       setIsDirty(false);
+      clearEditorDraft(window.localStorage, editorDraftStorageKey(draft.id));
       router.push("/admin/posts?status=trashed");
     });
   }
 
   async function patchStatus(action: "trash" | "restore") {
     if (!draft.id) return;
-    const confirmMessage =
-      action === "trash"
-        ? dirtyRef.current
-          ? "还有未保存的修改；移到回收站会放弃这些修改并立即隐藏公开页面，确定继续？"
-          : "确定移到回收站？公开页面会立即隐藏。"
-        : "";
-    if (confirmMessage && !window.confirm(confirmMessage)) return;
+    if (action === "trash") {
+      const confirmed = await requestConfirmation({
+        title: `把“${draft.title}”移到回收站？`,
+        description: dirtyRef.current
+          ? "公开页面会立即隐藏；未保存修改只保留在浏览器本地，不会写入服务器。"
+          : "公开页面会立即隐藏，之后仍可从回收站恢复。",
+        confirmLabel: "移到回收站",
+        danger: true
+      });
+      if (!confirmed) return;
+    }
 
     setMessage("");
     await runPending("操作失败", async () => {
@@ -273,20 +429,13 @@ export function AdminEditor({
     if (!draft.id) return;
     const targetRevision = revisionItems.find((revision) => revision.id === revisionId);
     if (!targetRevision) return;
-    if (
-      dirtyRef.current &&
-      !window.confirm("回退版本会覆盖当前未保存的修改，确定继续？")
-    ) {
-      return;
-    }
-    if (
-      targetRevision.status !== draft.status &&
-      !window.confirm(
-        `这会把当前内容回退为“${statusText(targetRevision.status, false)}”状态，确定继续？`
-      )
-    ) {
-      return;
-    }
+    const confirmed = await requestConfirmation({
+      title: `回退到${statusText(targetRevision.status, false)}版本？`,
+      description: `${dirtyRef.current ? "当前未保存修改会被覆盖；" : ""}正文、元数据和标签将恢复到所选版本${targetRevision.status !== draft.status ? `，内容状态也会变为“${statusText(targetRevision.status, false)}”` : ""}。`,
+      confirmLabel: "回退版本",
+      danger: dirtyRef.current || targetRevision.status !== draft.status
+    });
+    if (!confirmed) return;
 
     setMessage("");
     await runPending("回退失败", async () => {
@@ -346,13 +495,35 @@ export function AdminEditor({
     }
   }
 
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "s") return;
+      event.preventDefault();
+      if (pendingRef.current || draft.status === "trashed") return;
+      void save(draft.id ? draft.status : "draft");
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  });
+
   return (
-    <div className="editor-layout">
+    <div className={`editor-layout editor-view-${viewMode}`}>
       <div className="editor-main">
+        {recovery ? (
+          <section className={`admin-notice ${recovery.kind === "stale" ? "error" : "info"}`} role="status">
+            <strong>{recovery.kind === "stale" ? "检测到基于旧服务器版本的本地草稿" : "检测到未提交的本地草稿"}</strong>
+            <span>{recovery.kind === "stale" ? "服务器内容已发生变化，恢复后请逐项检查。" : "可以恢复上次未保存的编辑。"}</span>
+            <div className="btn-row">
+              <button className="btn primary" type="button" onClick={recoverLocalDraft}>恢复草稿</button>
+              <button className="btn ghost" type="button" onClick={discardLocalDraft}>放弃本地副本</button>
+            </div>
+          </section>
+        ) : null}
         <div className="editor-toolbar">
           <div className="editor-statusbar">
             <span className={`status-pill ${draft.status}`}>{statusText(draft.status, !draft.id)}</span>
             <span className="type-pill">{typeText(draft.type)}</span>
+            <span className={`chip ${isDirty ? "is-dirty" : ""}`}>{isDirty ? "有未保存修改" : "已保存"}</span>
             {post ? (
               <div className="editor-dates" aria-label="内容时间">
                 <span>
@@ -373,11 +544,25 @@ export function AdminEditor({
             )}
           </div>
           <div className="btn-row">
+            <div className="segmented editor-view-switch" aria-label="编辑器视图">
+              {(["write", "split", "preview"] as const).map((mode) => (
+                <button
+                  key={mode}
+                  className={`seg-btn ${viewMode === mode ? "is-active" : ""}`}
+                  type="button"
+                  aria-pressed={viewMode === mode}
+                  onClick={() => changeViewMode(mode)}
+                >
+                  {mode === "write" ? "写作" : mode === "split" ? "分栏" : "预览"}
+                </button>
+              ))}
+            </div>
             <Link
               className="btn ghost"
               href={backHref}
               onClick={(event) => {
-                if (!confirmLeave()) event.preventDefault();
+                event.preventDefault();
+                confirmLeaveAndNavigate();
               }}
             >
               {backLabel}
@@ -432,7 +617,20 @@ export function AdminEditor({
 
         {helpOpen ? <WritingHelp /> : null}
 
-        <div className="editor-panel">
+        <div className="editor-title-field">
+          <label htmlFor="editor-title">标题</label>
+          <input
+            id="editor-title"
+            className="editor-title-input"
+            value={draft.title}
+            disabled={draft.status === "trashed"}
+            onChange={(event) => update("title", event.target.value)}
+            placeholder="输入内容标题"
+          />
+        </div>
+
+        <div className="editor-workspace">
+        <div className="editor-panel editor-write-panel">
           <div className="editor-panel-head">
             <span>Markdown</span>
             <span>{draft.markdown.length} chars</span>
@@ -446,15 +644,19 @@ export function AdminEditor({
           />
         </div>
 
-        <div className="editor-panel">
+        <div className="editor-panel editor-preview-panel">
           <div className="editor-panel-head">
             <span>Live Preview</span>
-            <span>server rendered</span>
+            <span className={`chip preview-${previewState}`}>
+              {previewState === "loading" ? "渲染中" : previewState === "error" ? "渲染失败" : "已消毒 HTML"}
+            </span>
           </div>
-          <div
-            className="preview-pane gh-content"
-            dangerouslySetInnerHTML={{ __html: preview }}
-          />
+          {previewState === "error" ? (
+            <p className="empty-state">预览暂时无法生成，正文不会丢失。</p>
+          ) : (
+            <div className="preview-pane gh-content" dangerouslySetInnerHTML={{ __html: preview }} />
+          )}
+        </div>
         </div>
       </div>
 
@@ -553,10 +755,6 @@ export function AdminEditor({
         ) : null}
 
         <section className="settings-card form-grid">
-          <div className="field">
-            <label>标题</label>
-            <input className="input" value={draft.title} disabled={draft.status === "trashed"} onChange={(event) => update("title", event.target.value)} />
-          </div>
           <div className="field">
             <label>Slug</label>
             <input className="input" value={draft.slug} disabled={draft.status === "trashed"} onChange={(event) => update("slug", event.target.value)} placeholder={`留空自动生成 ${getContentTypeDefinition(draft.type).slugPrefix}-001`} />
@@ -658,6 +856,16 @@ export function AdminEditor({
           </div>
         </section>
       </aside>
+      <ConfirmDialog
+        open={Boolean(confirmation)}
+        title={confirmation?.title ?? ""}
+        description={confirmation?.description ?? ""}
+        confirmLabel={confirmation?.confirmLabel ?? "确认"}
+        danger={confirmation?.danger}
+        pending={pending}
+        onCancel={() => finishConfirmation(false)}
+        onConfirm={() => finishConfirmation(true)}
+      />
     </div>
   );
 }

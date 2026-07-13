@@ -1,12 +1,16 @@
 "use client";
 
 import { useRef, useState, useTransition } from "react";
+import type { ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import type { ThemeInstallRecord } from "@/types/blog";
 import type { ThemeDefinition } from "@/themes/types";
 
 type CompiledTheme = ThemeDefinition["meta"] &
-  Pick<ThemeDefinition, "apiVersion" | "capabilities">;
+  Pick<ThemeDefinition, "apiVersion" | "capabilities"> & {
+    adminPreview: ReactNode;
+    hasAdminTheme: boolean;
+  };
 
 function ThemeCardPreview({ themeId, themeName }: { themeId: string; themeName: string }) {
   if (themeId === "manjyun-console") {
@@ -159,8 +163,8 @@ export function ThemeManager({
         <div>
           <h2>编译主题库</h2>
           <p>
-            当前：{currentTheme?.name ?? activeTheme}。只有已编译并通过当前 Theme API
-            契约的主题可以激活。
+            当前：{currentTheme?.name ?? activeTheme}。激活主题会同时更新公开站点与
+            ManJyun Admin；缺少后台配套时会安全回退到 Console。
           </p>
         </div>
         <div className="theme-toolbar-actions">
@@ -220,13 +224,22 @@ export function ThemeManager({
           const isActive = activeTheme === theme.id;
           const previewHref = `/theme-preview/${encodeURIComponent(theme.id)}`;
           return (
-            <article className="theme-card" key={theme.id}>
-              <ThemeCardPreview themeId={theme.id} themeName={theme.name} />
+            <article className="theme-card" key={theme.id} data-theme-id={theme.id}>
+              <div className="theme-pair-previews">
+                <div className="theme-preview-unit">
+                  <span>公开站点</span>
+                  <ThemeCardPreview themeId={theme.id} themeName={theme.name} />
+                </div>
+                <div className="theme-preview-unit">
+                  <span>管理后台</span>
+                  {theme.adminPreview}
+                </div>
+              </div>
               <div className="theme-card-body">
                 <div className="theme-card-copy">
                   <h2>{theme.name}</h2>
                   <small>
-                    v{theme.version} · Theme API {theme.apiVersion}
+                    v{theme.version} · Theme API {theme.apiVersion} · {theme.hasAdminTheme ? "含后台主题" : "后台回退 Console"}
                   </small>
                   <p>{theme.description}</p>
                 </div>
@@ -254,13 +267,13 @@ export function ThemeManager({
         })}
       </section>
 
-      <section className="settings-card form-grid">
-        <div className="settings-section-head">
+      <details className="settings-card form-grid theme-advanced">
+        <summary className="settings-section-head">
           <div>
-            <h2>Manifest 审查记录</h2>
+            <h2>高级：Manifest 审查记录</h2>
             <p>兼容只代表 manifest 通过接口审查，不代表主题代码已经安装或可激活。</p>
           </div>
-        </div>
+        </summary>
         {imports.length ? (
           <div className="import-list">
             {imports.map((item) => (
@@ -286,7 +299,7 @@ export function ThemeManager({
         ) : (
           <p className="empty-state">还没有 manifest 审查记录。</p>
         )}
-      </section>
+      </details>
     </div>
   );
 }

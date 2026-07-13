@@ -2,6 +2,11 @@
 
 import { useMemo, useState, useTransition } from "react";
 import type { HomeModule, NavLink, SiteSettings } from "@/types/blog";
+import {
+  editableSiteSettingKeys,
+  moveOrderedItem,
+  normalizeOrder
+} from "@/lib/admin/settings-validation";
 
 type EditableLink = Omit<NavLink, "id"> & { localId: string };
 type LinkIconState = {
@@ -34,9 +39,18 @@ function toSaveLinks(links: EditableLink[]) {
       label: link.label.trim(),
       url: link.url.trim(),
       iconUrl: link.iconUrl?.trim() || null,
-      sortOrder: Number(link.sortOrder) || (index + 1) * 10
+      sortOrder: (index + 1) * 10
     }))
     .filter((link) => link.label && link.url);
+}
+
+function settingsSignature(
+  form: SiteSettings,
+  modules: HomeModule[],
+  mainNav: EditableLink[],
+  frequentNav: EditableLink[]
+) {
+  return JSON.stringify({ form, modules, mainNav, frequentNav });
 }
 
 function configText(module: HomeModule, key: string, fallback = "") {
@@ -74,6 +88,14 @@ export function SettingsForm({
   );
   const [mainNav, setMainNav] = useState(toEditableLinks(mainLinks));
   const [frequentNav, setFrequentNav] = useState(toEditableLinks(frequentLinks));
+  const [savedSignature, setSavedSignature] = useState(() =>
+    settingsSignature(
+      settings,
+      [...modules].sort((a, b) => a.sortOrder - b.sortOrder),
+      toEditableLinks(mainLinks),
+      toEditableLinks(frequentLinks)
+    )
+  );
   const [linkIconStates, setLinkIconStates] = useState<Record<string, LinkIconState>>({});
 
   const enabledModules = useMemo(
@@ -83,6 +105,11 @@ export function SettingsForm({
         .sort((a, b) => a.sortOrder - b.sortOrder),
     [homeModules]
   );
+  const currentSignature = useMemo(
+    () => settingsSignature(form, homeModules, mainNav, frequentNav),
+    [form, frequentNav, homeModules, mainNav]
+  );
+  const isDirty = currentSignature !== savedSignature;
 
   function update<K extends keyof SiteSettings>(key: K, value: SiteSettings[K]) {
     setForm((current) => ({ ...current, [key]: value }));
@@ -103,6 +130,12 @@ export function SettingsForm({
           ? { ...module, config: { ...module.config, [key]: value } }
           : module
       )
+    );
+  }
+
+  function moveModule(index: number, direction: -1 | 1) {
+    setHomeModules((current) =>
+      normalizeOrder(moveOrderedItem(current, index, direction))
     );
   }
 
@@ -142,6 +175,11 @@ export function SettingsForm({
       delete next[localId];
       return next;
     });
+  }
+
+  function moveLink(group: "main" | "frequent", index: number, direction: -1 | 1) {
+    const setter = group === "main" ? setMainNav : setFrequentNav;
+    setter((current) => normalizeOrder(moveOrderedItem(current, index, direction)));
   }
 
   function updateLinkIconState(localId: string, state: LinkIconState) {
@@ -227,20 +265,28 @@ export function SettingsForm({
   function save() {
     setMessage("");
     startTransition(async () => {
+      const editableSettings = editableSiteSettingKeys.reduce(
+        (result, key) => ({ ...result, [key]: form[key] }),
+        {} as Record<(typeof editableSiteSettingKeys)[number], string>
+      );
+      const payload = {
+        settings: editableSettings,
+        modules: normalizeOrder(homeModules),
+        mainLinks: toSaveLinks(mainNav),
+        frequentLinks: toSaveLinks(frequentNav)
+      };
       const settingsResponse = await fetch("/api/admin/settings", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          settings: form,
-          modules: homeModules,
-          mainLinks: toSaveLinks(mainNav),
-          frequentLinks: toSaveLinks(frequentNav)
-        })
+        body: JSON.stringify(payload)
       });
       if (!settingsResponse.ok) {
-        setMessage("保存失败");
+        const data = (await settingsResponse.json().catch(() => null)) as { error?: string } | null;
+        setMessage(`保存失败：${data?.error ?? "请检查输入"}`);
         return;
       }
+      setHomeModules(payload.modules);
+      setSavedSignature(settingsSignature(form, payload.modules, mainNav, frequentNav));
       setMessage("设置已保存");
     });
   }
@@ -248,11 +294,17 @@ export function SettingsForm({
   return (
     <div className="settings-workbench">
       <div className="settings-stack">
-        <section className="settings-card form-grid">
+        <nav className="settings-section-nav settings-card" aria-label="设置分区">
+          <a href="#settings-general">基础信息</a>
+          <a href="#settings-pages">页面文案</a>
+          <a href="#settings-home">首页编排</a>
+          <a href="#settings-navigation">导航链接</a>
+        </nav>
+        <section className="settings-card form-grid settings-anchor-section" id="settings-general">
           <div className="settings-section-head">
             <div>
-              <h2>站点与页面</h2>
-              <p>控制公开页标题、说明、About 内容和基础信息。</p>
+              <h2>基础信息</h2>
+              <p>站点身份、公开地址和运行起始时间。</p>
             </div>
           </div>
           <div className="settings-two">
@@ -270,12 +322,17 @@ export function SettingsForm({
             <input className="input" value={form.siteDescription} onChange={(event) => update("siteDescription", event.target.value)} />
           </div>
           <div className="field">
-            <label>首页简介</label>
-            <textarea className="textarea compact" value={form.heroBio} onChange={(event) => update("heroBio", event.target.value)} />
+            <label>Uptime 起始日期</label>
+            <input className="input" type="date" value={form.uptimeStart} onChange={(event) => update("uptimeStart", event.target.value)} />
           </div>
-          <div className="field">
-            <label>首页标签，逗号分隔</label>
-            <input className="input" value={form.heroTags} onChange={(event) => update("heroTags", event.target.value)} />
+        </section>
+
+        <section className="settings-card form-grid settings-anchor-section" id="settings-pages">
+          <div className="settings-section-head">
+            <div>
+              <h2>页面文案</h2>
+              <p>维护随笔、项目与 About 页面标题和说明。</p>
+            </div>
           </div>
           <div className="settings-two">
             <div className="field">
@@ -305,21 +362,25 @@ export function SettingsForm({
             <label>About 页面 Markdown</label>
             <textarea className="textarea" value={form.aboutMarkdown} onChange={(event) => update("aboutMarkdown", event.target.value)} />
           </div>
-          <div className="field">
-            <label>Uptime 起始日期</label>
-            <input className="input" value={form.uptimeStart} onChange={(event) => update("uptimeStart", event.target.value)} />
-          </div>
         </section>
 
-        <section className="settings-card form-grid">
+        <section className="settings-card form-grid settings-anchor-section" id="settings-home">
           <div className="settings-section-head">
             <div>
               <h2>主页模块编排</h2>
               <p>开启、关闭、重排首页模块，并修改模块标题和主要内容。</p>
             </div>
           </div>
+          <div className="field">
+            <label>首页简介</label>
+            <textarea className="textarea compact" value={form.heroBio} onChange={(event) => update("heroBio", event.target.value)} />
+          </div>
+          <div className="field">
+            <label>首页标签，逗号分隔</label>
+            <input className="input" value={form.heroTags} onChange={(event) => update("heroTags", event.target.value)} />
+          </div>
           <div className="module-editor-list">
-            {homeModules.map((module) => (
+            {homeModules.map((module, index) => (
               <article
                 className={`module-editor ${module.id === "now" ? "module-editor-now" : ""}`}
                 key={module.id}
@@ -335,15 +396,11 @@ export function SettingsForm({
                   <span>{moduleLabels[module.id] ?? module.id}</span>
                 </label>
                 <div className="field">
-                  <label>排序</label>
-                  <input
-                    className="input"
-                    type="number"
-                    value={module.sortOrder}
-                    onChange={(event) =>
-                      updateModule(module.id, { sortOrder: Number(event.target.value) || 0 })
-                    }
-                  />
+                  <label>顺序</label>
+                  <div className="order-controls">
+                    <button className="icon-btn" type="button" disabled={index === 0} aria-label={`上移 ${moduleLabels[module.id] ?? module.id}`} onClick={() => moveModule(index, -1)}>↑</button>
+                    <button className="icon-btn" type="button" disabled={index === homeModules.length - 1} aria-label={`下移 ${moduleLabels[module.id] ?? module.id}`} onClick={() => moveModule(index, 1)}>↓</button>
+                  </div>
                 </div>
                 <div className="field">
                   <label>模块标题</label>
@@ -413,7 +470,7 @@ export function SettingsForm({
           </div>
         </section>
 
-        <section className="settings-card form-grid">
+        <section className="settings-card form-grid settings-anchor-section" id="settings-navigation">
           <div className="settings-section-head">
             <div>
               <h2>导航与链接</h2>
@@ -427,6 +484,7 @@ export function SettingsForm({
             onUpdate={updateLink}
             onAdd={addLink}
             onRemove={removeLink}
+            onMove={moveLink}
             onFetchIcon={fetchLinkIcon}
             onUploadIcon={uploadLinkIcon}
             iconStates={linkIconStates}
@@ -441,6 +499,7 @@ export function SettingsForm({
             onUpdate={updateLink}
             onAdd={addLink}
             onRemove={removeLink}
+            onMove={moveLink}
             onFetchIcon={fetchLinkIcon}
             onUploadIcon={uploadLinkIcon}
             iconStates={linkIconStates}
@@ -455,7 +514,7 @@ export function SettingsForm({
             <p>保存后公开首页会按这里的顺序渲染。</p>
           </div>
         </div>
-        <div className="mini-browser">
+        <div className={`mini-browser mini-browser-${form.activeTheme}`} data-preview-theme={form.activeTheme}>
           <div className="mini-top">
             <span>{form.siteTitle}</span>
             <small>{mainNav.map((link) => link.label || "untitled").join(" / ")}</small>
@@ -474,11 +533,11 @@ export function SettingsForm({
           </div>
         </div>
         <div className="btn-row sticky-actions">
-          <button className="btn primary" type="button" disabled={pending} onClick={save}>
-            保存设置
+          <button className="btn primary" type="button" disabled={pending || !isDirty} onClick={save}>
+            {isDirty ? "保存设置" : "已保存"}
           </button>
           <span className={message.includes("失败") ? "error-text" : "success-text"}>
-            {pending ? "保存中..." : message}
+            {pending ? "保存中..." : message || (isDirty ? "有未保存修改" : "")}
           </span>
         </div>
       </aside>
@@ -493,6 +552,7 @@ function EditableLinks({
   onUpdate,
   onAdd,
   onRemove,
+  onMove,
   onFetchIcon,
   onUploadIcon,
   iconStates
@@ -503,6 +563,7 @@ function EditableLinks({
   onUpdate(group: "main" | "frequent", localId: string, patch: Partial<EditableLink>): void;
   onAdd(group: "main" | "frequent"): void;
   onRemove(group: "main" | "frequent", localId: string): void;
+  onMove(group: "main" | "frequent", index: number, direction: -1 | 1): void;
   onFetchIcon(group: "main" | "frequent", localId: string, url: string): Promise<void>;
   onUploadIcon(group: "main" | "frequent", localId: string, file: File): Promise<void>;
   iconStates: Record<string, LinkIconState>;
@@ -515,7 +576,7 @@ function EditableLinks({
           添加链接
         </button>
       </div>
-      {links.map((link) => (
+      {links.map((link, index) => (
         <div className="link-edit-unit" key={link.localId}>
           <div className="link-edit-row">
             <input
@@ -534,16 +595,10 @@ function EditableLinks({
                 onUpdate(group, link.localId, { url: event.target.value })
               }
             />
-            <input
-              className="input"
-              type="number"
-              value={link.sortOrder}
-              onChange={(event) =>
-                onUpdate(group, link.localId, {
-                  sortOrder: Number(event.target.value) || 0
-                })
-              }
-            />
+            <div className="order-controls">
+              <button className="icon-btn" type="button" disabled={index === 0} aria-label={`上移 ${link.label || "链接"}`} onClick={() => onMove(group, index, -1)}>↑</button>
+              <button className="icon-btn" type="button" disabled={index === links.length - 1} aria-label={`下移 ${link.label || "链接"}`} onClick={() => onMove(group, index, 1)}>↓</button>
+            </div>
             <button
               className="icon-btn danger"
               type="button"

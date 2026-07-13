@@ -28,8 +28,12 @@ function cleanRedirectError(error: unknown) {
 export async function setupAction(formData: FormData) {
   const username = String(formData.get("username") ?? "").trim();
   const password = String(formData.get("password") ?? "");
+  const passwordConfirm = String(formData.get("passwordConfirm") ?? "");
   if (!username || password.length < 8) {
     redirect("/admin/setup?error=用户名不能为空，密码至少 8 位");
+  }
+  if (password !== passwordConfirm) {
+    redirect("/admin/setup?error=两次输入的密码不一致");
   }
 
   try {

@@ -1,25 +1,11 @@
 import Link from "next/link";
-import { logoutAction } from "@/app/admin/actions";
+import { AdminShell } from "@/components/admin/AdminShell";
+import { getCurrentAdminTheme } from "@/components/admin/AdminThemeChrome";
 
 type Breadcrumb = {
   label: string;
   href?: string;
 };
-
-const primaryLinks = [
-  ["/admin", "概览"],
-  ["/admin/media", "媒体库"],
-  ["/admin/settings", "站点设置"],
-  ["/admin/themes", "主题"]
-] as const;
-
-const contentLinks = [
-  ["/admin/posts", "全部内容"],
-  ["/admin/posts?status=published", "已发布"],
-  ["/admin/posts?status=draft", "草稿"],
-  ["/admin/posts?status=trashed", "回收站"],
-  ["/admin/posts/new", "新建内容"]
-] as const;
 
 export function AdminFrame({
   title,
@@ -36,40 +22,18 @@ export function AdminFrame({
   action?: React.ReactNode;
   children: React.ReactNode;
 }) {
+  const resolvedTheme = getCurrentAdminTheme();
+  const BrandMark = resolvedTheme.theme.slots.BrandMark;
+  const ShellDecoration = resolvedTheme.theme.slots.ShellDecoration;
   return (
-    <div className="admin-shell">
-      <div className="admin-frame">
-        <aside className="admin-sidebar">
-          <Link className="admin-brand" href="/admin">
-            ManJyun<span>.</span>admin
-          </Link>
-          <nav className="admin-menu">
-            <div className="admin-menu-group">
-              <span className="admin-menu-label">总览</span>
-              <Link className={activeNav === "/admin" ? "is-active" : ""} href="/admin">概览</Link>
-            </div>
-            <div className="admin-menu-group">
-              <span className="admin-menu-label">内容</span>
-              {contentLinks.map(([href, label]) => (
-                <Link key={href} className={activeNav === href ? "is-active" : ""} href={href}>
-                  {label}
-                </Link>
-              ))}
-            </div>
-            <div className="admin-menu-group">
-              <span className="admin-menu-label">系统</span>
-              {primaryLinks.slice(1).map(([href, label]) => (
-                <Link key={href} className={activeNav === href ? "is-active" : ""} href={href}>
-                  {label}
-                </Link>
-              ))}
-            </div>
-          </nav>
-          <form action={logoutAction} style={{ marginTop: "auto" }}>
-            <button className="btn ghost admin-logout" type="submit">退出登录</button>
-          </form>
-        </aside>
-        <main className="admin-main">
+    <AdminShell
+      brandMark={<BrandMark />}
+      variantLabel={resolvedTheme.theme.meta.variantLabel}
+      decoration={<ShellDecoration />}
+      fallbackMessage={resolvedTheme.isFallback
+        ? `当前前台主题“${resolvedTheme.requestedId}”没有配套后台主题，已安全回退到 ManJyun Console。`
+        : undefined}
+    >
           {breadcrumbs.length ? (
             <nav className="admin-breadcrumbs" aria-label="后台路径">
               {breadcrumbs.map((item, index) => (
@@ -91,8 +55,6 @@ export function AdminFrame({
             {action}
           </div>
           {children}
-        </main>
-      </div>
-    </div>
+    </AdminShell>
   );
 }

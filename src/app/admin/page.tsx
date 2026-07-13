@@ -4,6 +4,8 @@ import { DeploymentStatusCard } from "@/components/admin/DeploymentStatusCard";
 import { requireAdmin } from "@/lib/auth/session";
 import { dashboardStats, listAdminPostSummaries } from "@/lib/db/queries";
 import { formatDate } from "@/lib/content/format";
+import { resolveAdminTheme } from "@/admin/themes/registry";
+import { getSiteSettings } from "@/lib/db/queries";
 
 export const dynamic = "force-dynamic";
 
@@ -11,6 +13,7 @@ export default async function AdminDashboardPage() {
   await requireAdmin();
   const stats = dashboardStats();
   const recent = listAdminPostSummaries({ limit: 4 }).posts;
+  const currentAdminTheme = resolveAdminTheme(getSiteSettings().activeTheme);
 
   return (
     <AdminFrame
@@ -22,10 +25,18 @@ export default async function AdminDashboardPage() {
     >
       <div className="dashboard-grid">
         <section className="stats-grid">
-          <div className="stat-card"><strong>{stats.published}</strong><span>已发布</span></div>
-          <div className="stat-card"><strong>{stats.drafts}</strong><span>草稿</span></div>
-          <div className="stat-card"><strong>{stats.trashed}</strong><span>回收站</span></div>
-          <div className="stat-card"><strong>{stats.media}</strong><span>媒体</span></div>
+          <Link className="stat-card" href="/admin/posts?status=published"><strong>{stats.published}</strong><span>已发布</span></Link>
+          <Link className="stat-card" href="/admin/posts?status=draft"><strong>{stats.drafts}</strong><span>草稿</span></Link>
+          <Link className="stat-card" href="/admin/posts?status=trashed"><strong>{stats.trashed}</strong><span>回收站</span></Link>
+          <Link className="stat-card" href="/admin/media"><strong>{stats.media}</strong><span>媒体</span></Link>
+        </section>
+        <section className="admin-panel dashboard-theme-status">
+          <div>
+            <span className="deployment-kicker">Appearance</span>
+            <h2>{currentAdminTheme.theme.meta.variantLabel}</h2>
+            <p>前台与 ManJyun Admin 正在使用同一主题语言。</p>
+          </div>
+          <Link className="btn" href="/admin/themes">管理外观</Link>
         </section>
         <DeploymentStatusCard />
         <section className="admin-panel quick-panel">
@@ -33,8 +44,8 @@ export default async function AdminDashboardPage() {
           <div className="quick-actions">
             <Link className="btn primary" href="/admin/posts/new">新建内容</Link>
             <Link className="btn" href="/admin/posts?status=draft">查看草稿</Link>
-            <Link className="btn" href="/admin/posts?status=trashed">打开回收站</Link>
-            <Link className="btn" href="/admin/settings">维护首页 Stack</Link>
+            <Link className="btn" href="/admin/settings">维护站点设置</Link>
+            <Link className="btn" href="/" target="_blank">查看公开站点 ↗</Link>
           </div>
         </section>
         <section className="admin-panel activity-panel">

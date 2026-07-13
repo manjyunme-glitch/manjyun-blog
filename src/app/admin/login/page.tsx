@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { loginAction } from "@/app/admin/actions";
 import { getCurrentAdmin } from "@/lib/auth/session";
 import { isSetupComplete } from "@/lib/db/queries";
+import { AdminThemeChrome } from "@/components/admin/AdminThemeChrome";
 
 export const dynamic = "force-dynamic";
 
@@ -18,22 +19,24 @@ export default async function LoginPage({
   return (
     <main className="auth-page">
       <form className="auth-card form-grid" action={loginAction}>
+        <AdminThemeChrome slot="AuthDecoration" />
         <div>
-          <h1 className="admin-title">登录写作台</h1>
-          <p className="admin-subtitle">管理内容、媒体、主题和首页模块。</p>
+          <h1 className="admin-title">登录 ManJyun Admin</h1>
+          <p className="admin-subtitle">进入共享工作台，管理内容、媒体、外观和站点设置。</p>
         </div>
-        {error ? <p className="error-text">{decodeURIComponent(error)}</p> : null}
+        {error ? <p className="admin-notice error" role="alert" tabIndex={-1}>{decodeURIComponent(error)}</p> : null}
         <div className="field">
-          <label>用户名</label>
-          <input className="input" name="username" autoComplete="username" required />
+          <label htmlFor="login-username">用户名</label>
+          <input id="login-username" className="input" name="username" autoComplete="username" autoFocus required />
         </div>
         <div className="field">
-          <label>密码</label>
-          <input className="input" name="password" type="password" autoComplete="current-password" required />
+          <label htmlFor="login-password">密码</label>
+          <input id="login-password" className="input" name="password" type="password" autoComplete="current-password" required />
         </div>
         <button className="btn primary" type="submit">
           登录
         </button>
+        <a className="auth-home-link" href="/">返回站点首页</a>
       </form>
     </main>
   );
