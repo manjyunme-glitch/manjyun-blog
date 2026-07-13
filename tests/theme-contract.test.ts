@@ -212,6 +212,8 @@ test("neon rift keeps its article toc sticky and its telemetry readable", () => 
   assert.match(source, /\.rift-status-panel h2\s*\{\s*color:\s*#111114/);
   assert.match(source, /\.rift-status-panel dd\s*\{\s*color:\s*#111114/);
   assert.match(source, /@keyframes rift-title-flicker/);
+  assert.match(source, /@keyframes rift-title-signal/);
+  assert.match(source, /\.rift-nav a\[aria-current="page"\]\s*\{[\s\S]*?color:\s*#050506/);
 });
 
 test("theme manager uses purpose-built thumbnails instead of scrollable iframes", () => {

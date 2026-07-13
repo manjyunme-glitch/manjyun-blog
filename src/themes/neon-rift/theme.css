@@ -390,13 +390,19 @@
   [data-theme="neon-rift"] .rift-brand-mark i:nth-child(2) { background: var(--rift-pink); }
   [data-theme="neon-rift"] .rift-brand strong { font-size: 1rem; font-weight: 900; letter-spacing: 0.055em; }
   [data-theme="neon-rift"] .rift-nav a { color: #d6d2c2; font-weight: 900; }
-  [data-theme="neon-rift"] .rift-nav a:hover,
-  [data-theme="neon-rift"] .rift-nav a[aria-current="page"] {
-    color: #0b0b0d;
+  [data-theme="neon-rift"] .rift-nav a:hover {
+    color: #050506 !important;
     background: var(--rift-yellow);
+    text-shadow: none;
+  }
+  [data-theme="neon-rift"] .rift-nav a[aria-current="page"] {
+    color: #050506 !important;
+    background: var(--rift-yellow);
+    box-shadow: inset 0 -4px #050506;
+    text-shadow: none;
   }
   [data-theme="neon-rift"] .rift-nav a:hover span,
-  [data-theme="neon-rift"] .rift-nav a[aria-current="page"] span { color: var(--rift-pink); }
+  [data-theme="neon-rift"] .rift-nav a[aria-current="page"] span { color: #9f002a; }
   [data-theme="neon-rift"] .rift-live { font-weight: 900; }
   [data-theme="neon-rift"] .rift-live i { border-radius: 0; background: var(--rift-pink); animation: rift-alert 1.2s steps(2, end) infinite; }
 
@@ -718,17 +724,27 @@
     line-height: 0.78;
     letter-spacing: -0.08em;
   }
+  [data-theme="neon-rift"] .rift-hero h1::before {
+    content: attr(data-text);
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    color: var(--rift-cyan);
+    opacity: 0;
+    pointer-events: none;
+    animation: rift-title-signal 5.2s steps(1, end) infinite;
+  }
   [data-theme="neon-rift"] .rift-hero h1::after {
     z-index: -1;
     color: var(--rift-pink);
-    transform: translate(8px, 9px);
+    transform: translate(10px, 12px);
     clip-path: none;
-    animation: rift-title-shadow 4.6s steps(1, end) infinite;
+    animation: rift-title-shadow 5.2s steps(1, end) infinite;
   }
   [data-theme="neon-rift"] .rift-hero h1 {
     isolation: isolate;
     z-index: 0;
-    animation: rift-title-flicker 4.6s steps(1, end) infinite;
+    animation: rift-title-flicker 5.2s steps(1, end) infinite;
   }
   [data-theme="neon-rift"] .rift-hero-bio {
     max-width: 36ch;
@@ -1138,17 +1154,51 @@
   }
 
   @keyframes rift-title-flicker {
-    0%, 6%, 9%, 12%, 62%, 65%, 100% { opacity: 1; transform: translate(0); }
-    7%, 11% { opacity: 0.48; transform: translateX(1px); }
-    63% { opacity: 0.72; transform: translateX(-2px); }
-    64% { opacity: 0.28; transform: translateX(2px); }
+    0%, 3.8%, 6.4%, 60%, 64%, 100% { opacity: 1; transform: translate(0); }
+    4% { opacity: 0.16; transform: translate(-12px, 1px) skewX(-3deg); }
+    4.4% { opacity: 1; transform: translate(10px, -2px); }
+    4.8% { opacity: 0.42; transform: translate(-7px, 1px); }
+    5.2% { opacity: 1; transform: translate(4px, 0); }
+    5.8% { opacity: 0.12; transform: translate(16px, -1px) scaleX(0.98); }
+    6.1% { opacity: 1; transform: translate(-2px, 0); }
+    61% { opacity: 0.3; transform: translate(-15px, 1px) skewX(4deg); }
+    61.4% { opacity: 1; transform: translate(12px, -2px); }
+    61.8% { opacity: 0.2; transform: translate(-9px, 2px); }
+    62.2% { opacity: 1; transform: translate(5px, 0); }
+    63.1% { opacity: 0.58; transform: translate(-4px, 0); }
+    63.5% { opacity: 1; transform: translate(0); }
   }
 
   @keyframes rift-title-shadow {
-    0%, 60%, 66%, 100% { transform: translate(8px, 9px); }
-    61% { transform: translate(12px, 9px); }
-    63% { transform: translate(5px, 9px); }
-    65% { transform: translate(10px, 9px); }
+    0%, 3.8%, 6.4%, 60%, 64%, 100% { transform: translate(10px, 12px); }
+    4% { transform: translate(25px, 10px); }
+    4.4% { transform: translate(-9px, 13px); }
+    4.8% { transform: translate(19px, 17px); }
+    5.2% { transform: translate(5px, 9px); }
+    5.8% { transform: translate(29px, 8px); }
+    6.1% { transform: translate(8px, 13px); }
+    61% { transform: translate(-13px, 16px); }
+    61.4% { transform: translate(27px, 7px); }
+    61.8% { transform: translate(3px, 19px); }
+    62.2% { transform: translate(18px, 10px); }
+    63.1% { transform: translate(5px, 13px); }
+    63.5% { transform: translate(12px, 11px); }
+  }
+
+  @keyframes rift-title-signal {
+    0%, 3.8%, 6.4%, 60%, 64%, 100% { opacity: 0; transform: translate(0); clip-path: inset(0); }
+    4% { opacity: 0.92; transform: translate(-19px, -3px); clip-path: inset(7% 0 67% 0); }
+    4.4% { opacity: 0.76; transform: translate(17px, 2px); clip-path: inset(38% 0 34% 0); }
+    4.8% { opacity: 0.88; transform: translate(-13px, 3px); clip-path: inset(69% 0 7% 0); }
+    5.2% { opacity: 0; transform: translate(0); clip-path: inset(0); }
+    5.8% { opacity: 0.82; transform: translate(22px, -1px); clip-path: inset(46% 0 42% 0); }
+    6.1% { opacity: 0.42; transform: translate(-8px, 1px); clip-path: inset(18% 0 64% 0); }
+    61% { opacity: 0.86; transform: translate(20px, -2px); clip-path: inset(12% 0 58% 0); }
+    61.4% { opacity: 0.72; transform: translate(-18px, 2px); clip-path: inset(51% 0 25% 0); }
+    61.8% { opacity: 0.9; transform: translate(14px, 3px); clip-path: inset(73% 0 5% 0); }
+    62.2% { opacity: 0; transform: translate(0); clip-path: inset(0); }
+    63.1% { opacity: 0.64; transform: translate(-11px, 0); clip-path: inset(31% 0 55% 0); }
+    63.5% { opacity: 0; transform: translate(0); clip-path: inset(0); }
   }
 
   @media (max-width: 780px) {
