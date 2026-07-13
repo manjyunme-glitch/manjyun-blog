@@ -165,7 +165,7 @@ test("compatible code blocks preserve indentation exactly", () => {
 test("theme registry returns the default theme", () => {
   assert.deepEqual(
     getThemes().map((theme) => theme.meta.id),
-    ["manjyun-console", "paper-atlas"]
+    ["manjyun-console", "paper-atlas", "neon-rift"]
   );
   assert.equal(getTheme("paper-atlas").meta.id, "paper-atlas");
   assert.equal(getTheme("missing").meta.id, "manjyun-console");

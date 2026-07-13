@@ -99,6 +99,6 @@ mkdir -p /share/DockerData/manjyun-blog/uploads
 
 ## 主题接口
 
-内置主题包括终端风格的 `ManJyun Console`（`src/themes/manjyun-console`）和明亮编辑设计的 `Paper Atlas`（`src/themes/paper-atlas`）。公开路由先由 `src/lib/themes/presenter.ts` 将数据库记录转换为稳定 ViewModel，再由 `ThemeHost` 分发到主题；主题不能直接读取数据库类型、格式化业务数据或拼接内容 URL。
+内置主题包括终端风格的 `ManJyun Console`（`src/themes/manjyun-console`）、明亮编辑设计的 `Paper Atlas`（`src/themes/paper-atlas`），以及赛博朋克记忆广播站风格的 `Neon Rift`（`src/themes/neon-rift`）。公开路由先由 `src/lib/themes/presenter.ts` 将数据库记录转换为稳定 ViewModel，再由 `ThemeHost` 分发到主题；主题不能直接读取数据库类型、格式化业务数据或拼接内容 URL。
 
 主题定义必须声明 `apiVersion`、`coreCompatibility`、`capabilities`、`tokens`，并实现 `Home`、`Collection`、`Entry`、`Page`、`NotFound` 五个槽位。类型契约与当前核心版本位于 `src/themes/types.ts`；新增受信任代码主题后，将其加入 `src/themes/index.ts` 并通过主题契约测试。后台主题页只能激活这些已编译且兼容的主题，并提供真实首页预览与单步回退；JSON 上传仅执行 manifest 兼容性审查，不会安装或执行上传的代码。

@@ -7,6 +7,7 @@ import {
 } from "@/lib/seo/metadata";
 import "./globals.css";
 import "@/themes/manjyun-console/theme.css";
+import "@/themes/neon-rift/theme.css";
 import "@/themes/paper-atlas/theme.css";
 
 export function generateMetadata(): Metadata {

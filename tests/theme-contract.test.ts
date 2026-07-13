@@ -9,6 +9,7 @@ import {
   presentPage
 } from "@/lib/themes/presenter";
 import { manjyunConsoleTheme } from "@/themes/manjyun-console";
+import { neonRiftTheme } from "@/themes/neon-rift";
 import { paperAtlasTheme } from "@/themes/paper-atlas";
 import type { NavLink, PostRecord, SiteSettings } from "@/types/blog";
 
@@ -88,6 +89,17 @@ test("paper atlas satisfies the same functional theme contract", () => {
     Object.keys(manjyunConsoleTheme.slots).sort()
   );
   assert.notEqual(paperAtlasTheme.tokens.bg, manjyunConsoleTheme.tokens.bg);
+});
+
+test("neon rift satisfies the same functional theme contract", () => {
+  assert.deepEqual(getThemeContractIssues(neonRiftTheme), []);
+  assert.equal(neonRiftTheme.apiVersion, manjyunConsoleTheme.apiVersion);
+  assert.deepEqual(
+    Object.keys(neonRiftTheme.slots).sort(),
+    Object.keys(manjyunConsoleTheme.slots).sort()
+  );
+  assert.notEqual(neonRiftTheme.tokens.bg, manjyunConsoleTheme.tokens.bg);
+  assert.notEqual(neonRiftTheme.tokens.accent, paperAtlasTheme.tokens.accent);
 });
 
 test("theme contract rejects incompatible API and core versions", () => {
@@ -176,4 +188,17 @@ test("console theme cannot rebuild business URLs from database records", () => {
   assert.match(source, /data-site-nav/);
   assert.match(source, /aria-current=\{item\.isCurrent/);
   assert.doesNotMatch(source, /auth-page|auth-card|admin-title|btn-row/);
+});
+
+test("neon rift consumes stable view models without rebuilding business URLs", () => {
+  const source = readFileSync(
+    new URL("../src/themes/neon-rift/index.tsx", import.meta.url),
+    "utf8"
+  );
+  assert.doesNotMatch(source, /@\/types\/blog/);
+  assert.doesNotMatch(source, /contentHref|getContentTypeDefinition/);
+  assert.doesNotMatch(source, /["'`]\/(?:posts|projects|tag)\//);
+  assert.match(source, /data-theme="neon-rift"/);
+  assert.match(source, /data-site-nav/);
+  assert.match(source, /aria-current=\{item\.isCurrent/);
 });
