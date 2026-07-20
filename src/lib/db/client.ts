@@ -1,4 +1,9 @@
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
+import {
+  ensureSetupToken,
+  removeStaleSetupToken
+} from "@/lib/auth/setup-token";
+import { validateAuthConfiguration } from "@/lib/auth/config";
 import { ensureDataDir, getDatabasePath } from "@/lib/paths";
 import { ensureSchema } from "@/lib/db/schema";
 
@@ -26,10 +31,28 @@ export function getDb() {
 
   if (!globalDb.__manjyunSchemaReady) {
     ensureSchema(globalDb.__manjyunDb);
+    validateAuthConfiguration();
+    const setupState = globalDb.__manjyunDb
+      .prepare("SELECT COUNT(*) AS count FROM admin_users")
+      .get() as { count: number };
+    if (setupState.count === 0) {
+      ensureSetupToken();
+    } else {
+      removeStaleSetupToken();
+    }
     globalDb.__manjyunSchemaReady = true;
   }
 
   return globalDb.__manjyunDb;
+}
+
+export function closeDatabaseForTests() {
+  const globalDb = globalThis as GlobalDb;
+  globalDb.__manjyunDb?.close();
+  delete globalDb.__manjyunDb;
+  delete globalDb.__manjyunSchemaReady;
+  delete globalDb.__manjyunTransactionDepth;
+  delete globalDb.__manjyunSavepointId;
 }
 
 export function all<T>(sql: string, params: unknown[] = []) {
@@ -85,6 +108,29 @@ export function transaction<T>(operation: () => T): T {
     throw error;
   } finally {
     globalDb.__manjyunTransactionDepth = depth;
+  }
+}
+
+export function readTransaction<T>(operation: () => T): T {
+  const db = getDb();
+  const globalDb = globalThis as GlobalDb;
+  const depth = globalDb.__manjyunTransactionDepth ?? 0;
+  if (depth > 0) {
+    // An outer read or write transaction already supplies a stable snapshot.
+    return operation();
+  }
+
+  db.exec("BEGIN");
+  globalDb.__manjyunTransactionDepth = 1;
+  try {
+    const result = operation();
+    db.exec("COMMIT");
+    return result;
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  } finally {
+    globalDb.__manjyunTransactionDepth = 0;
   }
 }
 

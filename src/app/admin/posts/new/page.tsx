@@ -16,7 +16,6 @@ export default async function NewPostPage() {
         { label: "内容", href: "/admin/posts" },
         { label: "新建内容" }
       ]}
-      activeNav="/admin/posts/new"
       action={<Link className="btn" href="/admin/posts?status=draft">返回草稿列表</Link>}
     >
       <AdminEditor post={null} backHref="/admin/posts?status=draft" backLabel="返回草稿列表" />

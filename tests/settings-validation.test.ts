@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  isValidCalendarDate,
   moveOrderedItem,
   normalizeOrder,
   validateSiteConfigurationPayload
@@ -40,6 +41,8 @@ test("settings validation excludes activeTheme and normalizes order", () => {
   });
   assert.equal(result.ok, true, result.issues.join("\n"));
   assert.equal("activeTheme" in result.value.settings, false);
+  assert.equal("aboutTitle" in result.value.settings, false);
+  assert.equal("aboutMarkdown" in result.value.settings, false);
   assert.equal(result.value.mainLinks[0]?.sortOrder, 10);
 });
 
@@ -54,6 +57,51 @@ test("settings validation rejects unsafe URLs and invalid limits", () => {
   assert.ok(result.issues.some((issue) => issue.includes("站点 URL")));
   assert.ok(result.issues.some((issue) => issue.includes("projects")));
   assert.ok(result.issues.some((issue) => issue.includes("主导航")));
+});
+
+test("calendar date validation rejects normalized overflow and handles leap years", () => {
+  assert.equal(isValidCalendarDate("2024-02-29"), true);
+  assert.equal(isValidCalendarDate("2000-02-29"), true);
+  assert.equal(isValidCalendarDate("1900-02-29"), false);
+  assert.equal(isValidCalendarDate("2026-02-29"), false);
+  assert.equal(isValidCalendarDate("2026-02-31"), false);
+  assert.equal(isValidCalendarDate("2026-04-31"), false);
+  assert.equal(isValidCalendarDate("2026-13-01"), false);
+  assert.equal(isValidCalendarDate("2026-00-10"), false);
+  assert.equal(isValidCalendarDate("2026-1-01"), false);
+
+  const result = validateSiteConfigurationPayload({
+    settings: { ...settings, uptimeStart: "2026-02-31" },
+    modules,
+    mainLinks: [],
+    frequentLinks: []
+  });
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.fieldErrors["settings.uptimeStart"], [
+    "Uptime 起始日期必须是有效的 YYYY-MM-DD 日期。"
+  ]);
+});
+
+test("settings validation keeps incomplete links visible and reports field errors", () => {
+  const result = validateSiteConfigurationPayload({
+    settings,
+    modules,
+    mainLinks: [
+      { label: "Home", url: "/" },
+      { label: "Incomplete", url: "" },
+      { label: "", url: "/missing-label" }
+    ],
+    frequentLinks: []
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.value.mainLinks.length, 3);
+  assert.deepEqual(result.fieldErrors["mainLinks.1.url"], [
+    "主导航“Incomplete”的 URL 必须是站内路径或 HTTP(S) 地址。"
+  ]);
+  assert.deepEqual(result.fieldErrors["mainLinks.2.label"], [
+    "主导航第 3 项缺少名称。"
+  ]);
 });
 
 test("ordered item helpers use stable ten-point order values", () => {

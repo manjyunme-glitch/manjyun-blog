@@ -40,6 +40,7 @@ const post: PostRecord = {
   seoDescription: "SEO 描述",
   createdAt: "2026-06-30T00:00:00.000Z",
   updatedAt: "2026-07-02T00:00:00.000Z",
+  version: 1,
   tags: []
 };
 

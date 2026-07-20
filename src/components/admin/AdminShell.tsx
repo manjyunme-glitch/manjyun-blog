@@ -8,9 +8,11 @@ import { logoutAction } from "@/app/admin/actions";
 const navigation = [
   { href: "/admin", label: "概览", exact: true },
   { href: "/admin/posts", label: "内容" },
+  { href: "/admin/pages", label: "页面" },
   { href: "/admin/media", label: "媒体" },
   { href: "/admin/themes", label: "外观" },
-  { href: "/admin/settings", label: "设置" }
+  { href: "/admin/settings", label: "设置" },
+  { href: "/admin/account", label: "账号安全" }
 ] as const;
 
 function isCurrent(pathname: string, href: string, exact?: boolean) {
@@ -32,29 +34,75 @@ export function AdminShell({
 }) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
+  const [mobileNavigation, setMobileNavigation] = useState(false);
   const toggleRef = useRef<HTMLButtonElement | null>(null);
   const firstLinkRef = useRef<HTMLAnchorElement | null>(null);
+  const sidebarRef = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    const query = window.matchMedia("(max-width: 860px)");
+    const sync = () => {
+      setMobileNavigation(query.matches);
+      if (!query.matches) setOpen(false);
+    };
+    sync();
+    query.addEventListener("change", sync);
+    return () => query.removeEventListener("change", sync);
+  }, []);
 
   useEffect(() => {
     setOpen(false);
   }, [pathname]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!mobileNavigation || !open) return;
+    const previousFocus =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
-    firstLinkRef.current?.focus();
+    const focusFrame = window.requestAnimationFrame(() => {
+      firstLinkRef.current?.focus();
+    });
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      setOpen(false);
-      toggleRef.current?.focus();
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setOpen(false);
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const sidebar = sidebarRef.current;
+      if (!sidebar) return;
+      const focusable = Array.from(
+        sidebar.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        )
+      ).filter((element) => !element.hidden);
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (!sidebar.contains(document.activeElement)) {
+        event.preventDefault();
+        (event.shiftKey ? last : first).focus();
+      } else if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
     };
-    window.addEventListener("keydown", onKeyDown);
+    document.addEventListener("keydown", onKeyDown);
     return () => {
+      window.cancelAnimationFrame(focusFrame);
       document.body.style.overflow = previousOverflow;
-      window.removeEventListener("keydown", onKeyDown);
+      document.removeEventListener("keydown", onKeyDown);
+      if (previousFocus?.isConnected) previousFocus.focus();
     };
-  }, [open]);
+  }, [mobileNavigation, open]);
+
+  const closedMobileNavigation = mobileNavigation && !open;
 
   return (
     <div className={`admin-shell ${open ? "is-nav-open" : ""}`}>
@@ -81,14 +129,20 @@ export function AdminShell({
         className="admin-nav-backdrop"
         type="button"
         aria-label="关闭后台导航"
+        aria-hidden={!open}
         tabIndex={open ? 0 : -1}
         onClick={() => {
           setOpen(false);
-          toggleRef.current?.focus();
         }}
       />
       <div className="admin-frame">
-        <aside className="admin-sidebar" id="admin-primary-navigation">
+        <aside
+          ref={sidebarRef}
+          className="admin-sidebar"
+          id="admin-primary-navigation"
+          aria-hidden={closedMobileNavigation || undefined}
+          inert={closedMobileNavigation || undefined}
+        >
           <Link className="admin-brand" href="/admin">
             {brandMark}
             <span className="admin-brand-copy">

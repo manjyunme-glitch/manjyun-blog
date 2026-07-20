@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { PublicInteractions } from "@/components/theme/PublicInteractions";
 import { PostToc } from "@/components/theme/PostToc";
+import { formatYear } from "@/lib/content/format";
 import {
   THEME_API_VERSION,
   type ThemeCollectionViewModel,
@@ -169,7 +170,10 @@ function EntryIndex({ entries }: { entries: ThemeEntrySummaryViewModel[] }) {
 function HomeEntriesModule({ module }: { module: Extract<ThemeHomeModuleViewModel, { kind: "entries" }> }) {
   const [feature, ...rest] = module.entries;
   return (
-    <section className={`paper-section paper-section-${module.id}`}>
+    <section
+      className={`paper-home-module paper-home-module-primary paper-section paper-section-${module.id}`}
+      data-home-module={module.id}
+    >
       <div className="paper-section-head">
         <div>
           <span>Editorial selection</span>
@@ -193,7 +197,10 @@ function HomeEntriesModule({ module }: { module: Extract<ThemeHomeModuleViewMode
 
 function ProjectModule({ module }: { module: Extract<ThemeHomeModuleViewModel, { kind: "entries" }> }) {
   return (
-    <section className="paper-section paper-project-section">
+    <section
+      className="paper-home-module paper-home-module-primary paper-section paper-project-section"
+      data-home-module={module.id}
+    >
       <div className="paper-section-head">
         <div><span>Selected works</span><h2>{module.title}</h2></div>
         <SmartLink className="paper-all-link" link={module.moreLink}>{module.moreLink.label} <span>→</span></SmartLink>
@@ -222,7 +229,10 @@ function ProjectModule({ module }: { module: Extract<ThemeHomeModuleViewModel, {
 function MarginModule({ module }: { module: Exclude<ThemeHomeModuleViewModel, { kind: "entries" }> }) {
   if (module.kind === "now") {
     return (
-      <aside className="paper-margin-note paper-now">
+      <aside
+        className="paper-home-module paper-home-module-margin paper-margin-note paper-now"
+        data-home-module={module.id}
+      >
         <span className="paper-note-pin">NOW</span>
         <h2>{module.title}</h2>
         <strong>{module.statusLabel}</strong>
@@ -233,7 +243,10 @@ function MarginModule({ module }: { module: Exclude<ThemeHomeModuleViewModel, { 
   }
   if (module.kind === "stack") {
     return (
-      <aside className="paper-margin-note paper-stack">
+      <aside
+        className="paper-home-module paper-home-module-margin paper-margin-note paper-stack"
+        data-home-module={module.id}
+      >
         <span className="paper-note-pin">TOOLS</span>
         <h2>{module.title}</h2>
         <div>{module.items.map((item) => <span key={item}>{item}</span>)}</div>
@@ -241,7 +254,10 @@ function MarginModule({ module }: { module: Exclude<ThemeHomeModuleViewModel, { 
     );
   }
   return (
-    <aside className="paper-margin-note paper-links">
+    <aside
+      className="paper-home-module paper-home-module-margin paper-margin-note paper-links"
+      data-home-module={module.id}
+    >
       <span className="paper-note-pin">LINKS</span>
       <h2>{module.title}</h2>
       {module.links.length ? module.links.map((link) => (
@@ -254,13 +270,6 @@ function MarginModule({ module }: { module: Exclude<ThemeHomeModuleViewModel, { 
 }
 
 function Home({ model }: { model: ThemeHomeViewModel }) {
-  const entryModules = model.modules.filter(
-    (module): module is Extract<ThemeHomeModuleViewModel, { kind: "entries" }> => module.kind === "entries"
-  );
-  const marginModules = model.modules.filter(
-    (module): module is Exclude<ThemeHomeModuleViewModel, { kind: "entries" }> => module.kind !== "entries"
-  );
-
   return (
     <PaperShell model={model}>
       <section className="paper-masthead">
@@ -272,27 +281,31 @@ function Home({ model }: { model: ThemeHomeViewModel }) {
           {model.hero.tags.map((tag) => <span key={tag}>{tag}</span>)}
         </div>
       </section>
+      {/* Keep presenter order in the DOM/mobile reading flow; CSS only assigns semantic desktop columns. */}
       <div className="paper-home-layout">
-        <div className="paper-home-primary">
-          {entryModules.map((module) =>
-            module.id === "projects"
+        {model.modules.map((module) =>
+          module.kind === "entries"
+            ? module.id === "projects"
               ? <ProjectModule module={module} key={module.id} />
               : <HomeEntriesModule module={module} key={module.id} />
-          )}
-        </div>
-        <div className="paper-home-margin">
-          {marginModules.map((module) => <MarginModule module={module} key={module.id} />)}
-        </div>
+            : <MarginModule module={module} key={module.id} />
+        )}
       </div>
     </PaperShell>
   );
 }
 
+export function paperArchiveYear(iso: string, fallbackLabel: string) {
+  return formatYear(iso) || fallbackLabel.slice(0, 4);
+}
+
 function groupEntriesByYear(entries: ThemeEntrySummaryViewModel[]) {
   const groups = new Map<string, ThemeEntrySummaryViewModel[]>();
   for (const entry of entries) {
-    const parsed = new Date(entry.published.iso);
-    const year = Number.isNaN(parsed.getTime()) ? entry.published.label.slice(0, 4) : String(parsed.getFullYear());
+    const year = paperArchiveYear(
+      entry.published.iso,
+      entry.published.label
+    );
     groups.set(year, [...(groups.get(year) ?? []), entry]);
   }
   return Array.from(groups.entries());
@@ -315,6 +328,21 @@ function Collection({ model }: { model: ThemeCollectionViewModel }) {
           <EntryIndex entries={entries} />
         </section>
       )) : <p className="paper-empty">{model.emptyMessage}</p>}
+      {model.pagination ? (
+        <nav className="paper-pagination" aria-label="集合分页">
+          {model.pagination.previous ? (
+            <SmartLink className="paper-page-link" link={model.pagination.previous}>
+              ← {model.pagination.previous.label}
+            </SmartLink>
+          ) : <span />}
+          <strong aria-current="page">{model.pagination.label}</strong>
+          {model.pagination.next ? (
+            <SmartLink className="paper-page-link" link={model.pagination.next}>
+              {model.pagination.next.label} →
+            </SmartLink>
+          ) : <span />}
+        </nav>
+      ) : null}
     </PaperShell>
   );
 }

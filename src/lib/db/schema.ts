@@ -17,7 +17,7 @@ const defaultSettings = {
   projectsDescription: "记录已经完成、正在折腾、或者值得复盘的项目。",
   aboutTitle: "About",
   aboutMarkdown:
-    "这里是关于页面。可以在后台设置里写 Markdown，也可以创建 slug 为 `about` 的页面来覆盖它。"
+    "这里是关于页面。可以在后台“页面”工作台使用 Markdown 编辑。"
 };
 
 const defaultModules = [
@@ -50,16 +50,29 @@ const defaultMainLinks = [
   ["main", "about", "/about", 40]
 ] as const;
 
+const legacyAboutDefaults = new Set([
+  "这里是关于页面。可以在后台设置里写 Markdown，也可以创建 slug 为 `about` 的页面来覆盖它。"
+]);
+
 export function ensureSchema(db: DatabaseSync) {
   const hadExistingSettingsTable = Boolean(
     db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'settings'").get()
   );
 
-  db.exec(`
+  // Every instance performs the check-and-migrate sequence while holding the
+  // SQLite writer lock. Without this lock two containers starting on the same
+  // old database can both observe a missing column and race the same ALTER.
+  // Foreign keys are disabled only for the legacy posts table rebuild and are
+  // restored before this function returns.
+  db.exec("PRAGMA foreign_keys = OFF;");
+  db.exec("BEGIN IMMEDIATE;");
+  try {
+    db.exec(`
     CREATE TABLE IF NOT EXISTS admin_users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       username TEXT NOT NULL UNIQUE,
       password_hash TEXT NOT NULL,
+      session_version INTEGER NOT NULL DEFAULT 1,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
@@ -77,6 +90,7 @@ export function ensureSchema(db: DatabaseSync) {
       seo_description TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      version INTEGER NOT NULL DEFAULT 1,
       UNIQUE(type, slug)
     );
 
@@ -122,9 +136,27 @@ export function ensureSchema(db: DatabaseSync) {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
+    CREATE TABLE IF NOT EXISTS idempotency_requests (
+      scope TEXT NOT NULL,
+      idempotency_key TEXT NOT NULL,
+      request_hash TEXT NOT NULL,
+      state TEXT NOT NULL CHECK (state IN ('processing', 'completed')),
+      operation_json TEXT NOT NULL DEFAULT '{}',
+      response_json TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (scope, idempotency_key)
+    );
+
     CREATE TABLE IF NOT EXISTS settings (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS site_configuration_meta (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      version INTEGER NOT NULL DEFAULT 1,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
     CREATE TABLE IF NOT EXISTS home_modules (
@@ -162,6 +194,8 @@ export function ensureSchema(db: DatabaseSync) {
       ON post_revisions(post_id, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_nav_links_group
       ON nav_links(group_name, sort_order);
+    CREATE INDEX IF NOT EXISTS idx_idempotency_scope_state_updated
+      ON idempotency_requests(scope, state, updated_at DESC);
   `);
 
   migratePostStatus(db);
@@ -175,6 +209,8 @@ export function ensureSchema(db: DatabaseSync) {
       ON post_revisions(post_id, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_nav_links_group
       ON nav_links(group_name, sort_order);
+    CREATE INDEX IF NOT EXISTS idx_idempotency_scope_state_updated
+      ON idempotency_requests(scope, state, updated_at DESC);
   `);
 
   const navColumns = db.prepare("PRAGMA table_info(nav_links)").all() as Array<{ name: string }>;
@@ -187,12 +223,28 @@ export function ensureSchema(db: DatabaseSync) {
     db.exec("ALTER TABLE post_revisions ADD COLUMN tags_json TEXT");
   }
 
+  const adminColumns = db.prepare("PRAGMA table_info(admin_users)").all() as Array<{ name: string }>;
+  if (!adminColumns.some((column) => column.name === "session_version")) {
+    db.exec("ALTER TABLE admin_users ADD COLUMN session_version INTEGER NOT NULL DEFAULT 1");
+  }
+
+  const postColumns = db.prepare("PRAGMA table_info(posts)").all() as Array<{ name: string }>;
+  if (!postColumns.some((column) => column.name === "version")) {
+    db.exec("ALTER TABLE posts ADD COLUMN version INTEGER NOT NULL DEFAULT 1");
+  }
+
+  db.prepare(
+    "INSERT OR IGNORE INTO site_configuration_meta (id, version) VALUES (1, 1)"
+  ).run();
+
   const settingStmt = db.prepare(
     "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)"
   );
   for (const [key, value] of Object.entries(defaultSettings)) {
     settingStmt.run(key, value);
   }
+
+  migrateLegacyAboutSettings(db, settingStmt);
 
   // Rename only untouched legacy defaults. Custom titles/descriptions are user
   // content and must never be overwritten during an application upgrade.
@@ -209,6 +261,10 @@ export function ensureSchema(db: DatabaseSync) {
   const moduleStmt = db.prepare(
     "INSERT OR IGNORE INTO home_modules (id, enabled, sort_order, config) VALUES (?, ?, ?, ?)"
   );
+  db.exec(`
+    DELETE FROM home_modules
+    WHERE id NOT IN ('recentPosts', 'now', 'projects', 'frequentLinks', 'stack')
+  `);
   for (const [id, enabled, sortOrder, config] of defaultModules) {
     moduleStmt.run(id, enabled, sortOrder, JSON.stringify(config));
   }
@@ -231,6 +287,99 @@ export function ensureSchema(db: DatabaseSync) {
     }
     settingStmt.run(mainNavSeedKey, "1");
   }
+    db.exec("COMMIT;");
+  } catch (error) {
+    try {
+      db.exec("ROLLBACK;");
+    } catch {
+      // Preserve the migration error if SQLite already rolled the transaction
+      // back while handling it.
+    }
+    throw error;
+  } finally {
+    db.exec("PRAGMA foreign_keys = ON;");
+  }
+}
+
+function migrateLegacyAboutSettings(
+  db: DatabaseSync,
+  settingStmt: ReturnType<DatabaseSync["prepare"]>
+) {
+  const migrationKey = "system.migration.about_page.v1";
+  if (db.prepare("SELECT 1 FROM settings WHERE key = ?").get(migrationKey)) {
+    return;
+  }
+
+  const rows = db.prepare(
+    "SELECT key, value FROM settings WHERE key IN ('aboutTitle', 'aboutMarkdown')"
+  ).all() as Array<{ key: string; value: string }>;
+  const legacy = Object.fromEntries(rows.map(({ key, value }) => [key, value]));
+  const title = String(legacy.aboutTitle ?? defaultSettings.aboutTitle).trim() || "About";
+  const markdown = String(legacy.aboutMarkdown ?? defaultSettings.aboutMarkdown);
+  const existing = db.prepare(
+    `SELECT id, title, markdown, status
+     FROM posts
+     WHERE type = 'page' AND slug = 'about'`
+  ).get() as {
+    id: number;
+    title: string;
+    markdown: string;
+    status: "draft" | "published" | "trashed";
+  } | undefined;
+  const now = new Date().toISOString();
+
+  if (!existing) {
+    db.prepare(
+      `INSERT INTO posts (
+        type, slug, title, markdown, status, published_at, created_at, updated_at
+      ) VALUES ('page', 'about', ?, ?, 'published', ?, ?, ?)`
+    ).run(title, markdown, now, now, now);
+  } else if (existing.status !== "published") {
+    let backupSlug = "about-unpublished-legacy";
+    let suffix = 2;
+    while (
+      db.prepare("SELECT 1 FROM posts WHERE type = 'page' AND slug = ?").get(
+        backupSlug
+      )
+    ) {
+      backupSlug = `about-unpublished-legacy-${suffix}`;
+      suffix += 1;
+    }
+    db.prepare(
+      "UPDATE posts SET slug = ?, updated_at = ? WHERE id = ?"
+    ).run(backupSlug, now, existing.id);
+    db.prepare(
+      `INSERT INTO posts (
+        type, slug, title, markdown, status, published_at, created_at, updated_at
+      ) VALUES ('page', 'about', ?, ?, 'published', ?, ?, ?)`
+    ).run(title, markdown, now, now, now);
+  } else {
+    const customizedLegacySettings =
+      title !== defaultSettings.aboutTitle ||
+      (!legacyAboutDefaults.has(markdown) && markdown !== defaultSettings.aboutMarkdown);
+    const differsFromPage =
+      existing.title !== title || existing.markdown !== markdown;
+
+    if (customizedLegacySettings && differsFromPage) {
+      let backupSlug = "about-settings-legacy";
+      let suffix = 2;
+      while (
+        db.prepare("SELECT 1 FROM posts WHERE type = 'page' AND slug = ?").get(
+          backupSlug
+        )
+      ) {
+        backupSlug = `about-settings-legacy-${suffix}`;
+        suffix += 1;
+      }
+      db.prepare(
+        `INSERT INTO posts (
+          type, slug, title, markdown, status, created_at, updated_at
+        ) VALUES ('page', ?, ?, ?, 'draft', ?, ?)`
+      ).run(backupSlug, `${title}（旧设置备份）`, markdown, now, now);
+    }
+  }
+
+  settingStmt.run(migrationKey, "1");
 }
 
 function migratePostStatus(db: DatabaseSync) {
@@ -241,9 +390,6 @@ function migratePostStatus(db: DatabaseSync) {
   if (!schema?.sql || schema.sql.includes("'trashed'")) return;
 
   db.exec(`
-    PRAGMA foreign_keys = OFF;
-    BEGIN TRANSACTION;
-
     CREATE TABLE posts_new (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       type TEXT NOT NULL CHECK (type IN ('post', 'page', 'project')),
@@ -272,8 +418,5 @@ function migratePostStatus(db: DatabaseSync) {
 
     DROP TABLE posts;
     ALTER TABLE posts_new RENAME TO posts;
-
-    COMMIT;
-    PRAGMA foreign_keys = ON;
   `);
 }

@@ -17,8 +17,13 @@ services:
         no_proxy: ${STACK_NO_PROXY:-}
     container_name: ${CONTAINER_NAME_PREFIX:-mblog}-app
     restart: unless-stopped
+    init: true
     network_mode: bridge
-    user: "${BLOG_UID:-0}:${BLOG_GID:-0}"
+    # New deployments run as the image's unprivileged nextjs user by default.
+    # An existing stack that explicitly sets 0:0 keeps its legacy behavior.
+    user: "${BLOG_UID:-1001}:${BLOG_GID:-1001}"
+    security_opt:
+      - no-new-privileges:true
     ports:
       - "${BLOG_BIND_IP:-0.0.0.0}:${BLOG_PORT:-4482}:3000"
     environment:
@@ -29,9 +34,12 @@ services:
       DATA_DIR: /app/data
       DATABASE_PATH: /app/data/manjyun.sqlite
       UPLOADS_DIR: /app/uploads
-      SITE_URL: ${SITE_URL:-http://localhost:4482}
+      STACK_BASE_DIR_HOST: ${STACK_BASE_DIR:?STACK_BASE_DIR must be an absolute persistent host directory}
+      SITE_URL: ${SITE_URL:?SITE_URL must be the public absolute URL}
       AUTH_SECRET: ${AUTH_SECRET:-}
+      SETUP_TOKEN: ${SETUP_TOKEN:-}
       SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-}
+      AUTH_TRUST_PROXY_HOPS: ${AUTH_TRUST_PROXY_HOPS:-0}
       GIT_COMMIT: ${GIT_COMMIT:-unknown}
       GITHUB_REPOSITORY: ${GITHUB_REPOSITORY:-manjyunme-glitch/manjyun-blog}
       GITHUB_BRANCH: ${GITHUB_BRANCH:-main}
@@ -45,8 +53,8 @@ services:
       https_proxy: ${STACK_HTTPS_PROXY:-}
       no_proxy: ${STACK_NO_PROXY:-}
     volumes:
-      - ${STACK_BASE_DIR:-.}/data:/app/data
-      - ${STACK_BASE_DIR:-.}/uploads:/app/uploads
+      - ${STACK_BASE_DIR:?STACK_BASE_DIR must be an absolute persistent host directory}/data:/app/data
+      - ${STACK_BASE_DIR:?STACK_BASE_DIR must be an absolute persistent host directory}/uploads:/app/uploads
     healthcheck:
       test:
         - CMD-SHELL

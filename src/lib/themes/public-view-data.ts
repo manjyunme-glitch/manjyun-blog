@@ -2,7 +2,7 @@ import {
   getHomeModules,
   getNavLinks,
   getSiteSettings,
-  listPosts
+  listPublishedPostSummaries
 } from "@/lib/db/queries";
 import { presentHome } from "@/lib/themes/presenter";
 
@@ -21,10 +21,9 @@ export function loadHomeThemeView() {
       modules,
       navLinks: getNavLinks("main"),
       frequentLinks: getNavLinks("frequent"),
-      posts: listPosts({ type: "post", status: "published", limit: recentLimit }),
-      projects: listPosts({
+      posts: listPublishedPostSummaries({ type: "post", limit: recentLimit }),
+      projects: listPublishedPostSummaries({
         type: "project",
-        status: "published",
         limit: projectLimit
       })
     })

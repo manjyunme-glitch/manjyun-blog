@@ -1,8 +1,12 @@
 import type { Metadata } from "next";
+import { notFound } from "next/navigation";
+import { StructuredData } from "@/components/seo/StructuredData";
 import { ThemeHost } from "@/components/theme/ThemeHost";
-import { renderMarkdown } from "@/lib/content/markdown";
 import { getNavLinks, getPageBySlug, getSiteSettings } from "@/lib/db/queries";
-import { createEntryMetadata, createPageMetadata } from "@/lib/seo/metadata";
+import {
+  createEntryMetadata,
+  createEntryStructuredData
+} from "@/lib/seo/metadata";
 import { presentPage } from "@/lib/themes/presenter";
 
 export const dynamic = "force-dynamic";
@@ -10,26 +14,28 @@ export const dynamic = "force-dynamic";
 export function generateMetadata(): Metadata {
   const settings = getSiteSettings();
   const page = getPageBySlug("about");
-  if (page) return createEntryMetadata(settings, page);
-  const markdown = settings.aboutMarkdown || settings.heroBio;
-  return createPageMetadata(settings, {
-    title: settings.aboutTitle,
-    description: renderMarkdown(markdown).text.slice(0, 180),
-    href: "/about"
-  });
+  if (!page) {
+    return { title: "页面不存在", robots: { index: false, follow: false } };
+  }
+  return createEntryMetadata(settings, page);
 }
 
 export default function AboutPage() {
   const settings = getSiteSettings();
   const page = getPageBySlug("about");
-  const markdown = page?.markdown || settings.aboutMarkdown || settings.heroBio;
+  if (!page) notFound();
   const view = presentPage({
     settings,
     navLinks: getNavLinks("main"),
-    title: page?.title || settings.aboutTitle,
+    title: page.title,
     href: "/about",
-    markdown
+    markdown: page.markdown
   });
 
-  return <ThemeHost themeId={settings.activeTheme} view={view} />;
+  return (
+    <>
+      <StructuredData data={createEntryStructuredData(settings, page)} />
+      <ThemeHost themeId={settings.activeTheme} view={view} />
+    </>
+  );
 }

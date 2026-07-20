@@ -17,5 +17,9 @@ stack.env.*
 data/*.sqlite
 data/*.sqlite-*
 data/auth-secret
+data/setup-token
+data/.setup-token-consumed-*
+data/.*.tmp
 uploads/*
 !uploads/.gitkeep
+/backups/

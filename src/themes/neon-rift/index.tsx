@@ -122,7 +122,10 @@ function EntryRow({ entry, index }: { entry: ThemeEntrySummaryViewModel; index: 
 
 function EntryModule({ module }: { module: Extract<ThemeHomeModuleViewModel, { kind: "entries" }> }) {
   return (
-    <section className={`rift-channel rift-channel-${module.id}`}>
+    <section
+      className={`rift-home-module rift-home-module-feed rift-channel rift-channel-${module.id}`}
+      data-home-module={module.id}
+    >
       <header className="rift-section-head">
         <div><span>TRANSMISSION / {module.id.toUpperCase()}</span><h2>{module.title}</h2></div>
         <SignalLink className="rift-more" link={module.moreLink}>{module.moreLink.label}<b>↗</b></SignalLink>
@@ -138,7 +141,10 @@ function EntryModule({ module }: { module: Extract<ThemeHomeModuleViewModel, { k
 
 function StatusModule({ module }: { module: Extract<ThemeHomeModuleViewModel, { kind: "now" }> }) {
   return (
-    <section className="rift-status-panel">
+    <section
+      className="rift-home-module rift-home-module-telemetry rift-status-panel"
+      data-home-module={module.id}
+    >
       <span className="rift-panel-code">STATUS::NOW</span>
       <h2>{module.title}</h2>
       <strong><i aria-hidden="true" />{module.statusLabel}</strong>
@@ -152,7 +158,10 @@ function StatusModule({ module }: { module: Extract<ThemeHomeModuleViewModel, { 
 
 function LinksModule({ module }: { module: Extract<ThemeHomeModuleViewModel, { kind: "links" }> }) {
   return (
-    <section className="rift-link-panel">
+    <section
+      className="rift-home-module rift-home-module-telemetry rift-link-panel"
+      data-home-module={module.id}
+    >
       <span className="rift-panel-code">UPLINK::NODES</span>
       <h2>{module.title}</h2>
       {module.links.length ? (
@@ -173,7 +182,10 @@ function LinksModule({ module }: { module: Extract<ThemeHomeModuleViewModel, { k
 
 function StackModule({ module }: { module: Extract<ThemeHomeModuleViewModel, { kind: "stack" }> }) {
   return (
-    <section className="rift-stack-panel">
+    <section
+      className="rift-home-module rift-home-module-telemetry rift-stack-panel"
+      data-home-module={module.id}
+    >
       <span className="rift-panel-code">LOADOUT::STACK</span>
       <h2>{module.title}</h2>
       <div>{module.items.map((item, index) => <span key={item}><i>{String(index + 1).padStart(2, "0")}</i>{item}</span>)}</div>
@@ -182,19 +194,6 @@ function StackModule({ module }: { module: Extract<ThemeHomeModuleViewModel, { k
 }
 
 function Home({ model }: { model: ThemeHomeViewModel }) {
-  const entries = model.modules.filter(
-    (module): module is Extract<ThemeHomeModuleViewModel, { kind: "entries" }> => module.kind === "entries"
-  );
-  const status = model.modules.find(
-    (module): module is Extract<ThemeHomeModuleViewModel, { kind: "now" }> => module.kind === "now"
-  );
-  const links = model.modules.find(
-    (module): module is Extract<ThemeHomeModuleViewModel, { kind: "links" }> => module.kind === "links"
-  );
-  const stack = model.modules.find(
-    (module): module is Extract<ThemeHomeModuleViewModel, { kind: "stack" }> => module.kind === "stack"
-  );
-
   return (
     <RiftShell model={model}>
       <section className="rift-hero">
@@ -210,21 +209,47 @@ function Home({ model }: { model: ThemeHomeViewModel }) {
         <div className="rift-tower" aria-hidden="true">
           <span className="rift-tower-grid" />
           <span className="rift-tower-halo" />
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/themes/neon-rift/signal-tower.png" alt="" width="864" height="1821" />
+          <picture>
+            <source
+              type="image/avif"
+              srcSet="/themes/neon-rift/signal-tower-432.avif 432w, /themes/neon-rift/signal-tower-864.avif 864w"
+              sizes="(max-width: 860px) 180px, 360px"
+            />
+            <source
+              type="image/webp"
+              srcSet="/themes/neon-rift/signal-tower-432.webp 432w, /themes/neon-rift/signal-tower-864.webp 864w"
+              sizes="(max-width: 860px) 180px, 360px"
+            />
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/themes/neon-rift/signal-tower.png"
+              alt=""
+              width="864"
+              height="1821"
+              decoding="async"
+              fetchPriority="high"
+            />
+          </picture>
           <span className="rift-tower-scan" />
           <span className="rift-tower-beacon"><i /><i /><i /></span>
           <small>RX<br />98.7</small>
         </div>
         <span className="rift-scroll-cue">BREACH THE ARCHIVE <i>↓</i></span>
       </section>
+      {/* Keep presenter order in the DOM/mobile reading flow; CSS only assigns semantic desktop columns. */}
       <div className="rift-home-grid">
-        <div className="rift-home-feed">{entries.map((module) => <EntryModule module={module} key={module.id} />)}</div>
-        <aside className="rift-home-telemetry">
-          {status ? <StatusModule module={status} /> : null}
-          {links ? <LinksModule module={links} /> : null}
-          {stack ? <StackModule module={stack} /> : null}
-        </aside>
+        {model.modules.map((module) => {
+          switch (module.kind) {
+            case "entries":
+              return <EntryModule module={module} key={module.id} />;
+            case "now":
+              return <StatusModule module={module} key={module.id} />;
+            case "links":
+              return <LinksModule module={module} key={module.id} />;
+            case "stack":
+              return <StackModule module={module} key={module.id} />;
+          }
+        })}
       </div>
     </RiftShell>
   );
@@ -247,6 +272,21 @@ function Collection({ model }: { model: ThemeCollectionViewModel }) {
           {model.entries.map((entry, index) => <EntryRow entry={entry} index={index} key={entry.id} />)}
         </div>
       ) : <p className="rift-empty">NO SIGNAL / {model.emptyMessage}</p>}
+      {model.pagination ? (
+        <nav className="rift-pagination" aria-label="集合分页">
+          {model.pagination.previous ? (
+            <SignalLink className="rift-page-link" link={model.pagination.previous}>
+              ← {model.pagination.previous.label}
+            </SignalLink>
+          ) : <span />}
+          <strong aria-current="page">{model.pagination.label}</strong>
+          {model.pagination.next ? (
+            <SignalLink className="rift-page-link" link={model.pagination.next}>
+              {model.pagination.next.label} →
+            </SignalLink>
+          ) : <span />}
+        </nav>
+      ) : null}
     </RiftShell>
   );
 }

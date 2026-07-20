@@ -136,7 +136,7 @@ function Section({
   children: React.ReactNode;
 }) {
   return (
-    <section className={`section section-${id}`}>
+    <section className={`section section-${id}`} data-home-module={id}>
       <div className="section-head">
         <h2 className="section-title">{title}</h2>
         {moreLink ? (
@@ -191,6 +191,32 @@ function PostList({
         </article>
       ))}
     </div>
+  );
+}
+
+function CollectionPagination({
+  pagination
+}: {
+  pagination: NonNullable<ThemeCollectionViewModel["pagination"]>;
+}) {
+  return (
+    <nav className="collection-pagination" aria-label="集合分页">
+      {pagination.previous ? (
+        <Link rel="prev" href={pagination.previous.href}>
+          ← {pagination.previous.label}
+        </Link>
+      ) : (
+        <span aria-hidden="true" />
+      )}
+      <span aria-current="page">{pagination.label}</span>
+      {pagination.next ? (
+        <Link rel="next" href={pagination.next.href}>
+          {pagination.next.label} →
+        </Link>
+      ) : (
+        <span aria-hidden="true" />
+      )}
+    </nav>
   );
 }
 
@@ -403,6 +429,9 @@ function Collection({ model }: { model: ThemeCollectionViewModel }) {
         </div>
       </div>
       <PostList entries={model.entries} empty={model.emptyMessage} detailed />
+      {model.pagination ? (
+        <CollectionPagination pagination={model.pagination} />
+      ) : null}
     </Shell>
   );
 }

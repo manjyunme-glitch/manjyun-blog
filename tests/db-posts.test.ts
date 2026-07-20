@@ -1,11 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { trackedTempDir } from "./fixtures/tracked-temp-dir";
 
 test("post publishing preserves first publish time and safe revision history", async () => {
-  const root = mkdtempSync(path.join(tmpdir(), "manjyun-db-"));
+  const root = trackedTempDir("manjyun-db-");
   process.env.DATA_DIR = root;
   process.env.UPLOADS_DIR = path.join(root, "uploads");
   process.env.DATABASE_PATH = path.join(root, "manjyun.sqlite");
@@ -15,44 +14,70 @@ test("post publishing preserves first publish time and safe revision history", a
     contentStatusCounts,
     contentTypeCounts,
     dashboardStats,
+    deletePostPermanently,
     getAdjacentPosts,
     getPostById,
     getPreviousTheme,
+    getHomeModules,
+    getSiteConfiguration,
     getSiteSettings,
     getTagBySlug,
+    listAdminPages,
     listAdminPostSummaries,
     listPosts,
+    listPostRevisionPage,
     listPostRevisions,
     replaceNavLinks,
     restorePostRevision,
     rollbackTheme,
     savePost,
     setPostStatus,
+    ThemeSelectionConflictError,
     updateSiteConfiguration
   } = await import("@/lib/db/queries");
 
   assert.equal(getSiteSettings().activeTheme, "manjyun-console");
   assert.equal(getPreviousTheme(), null);
   assert.equal("previousTheme" in getSiteSettings(), false);
-  assert.equal(rollbackTheme(), null);
+  assert.equal(
+    rollbackTheme("paper-atlas", "manjyun-console"),
+    null
+  );
 
-  assert.deepEqual(activateTheme("paper-atlas"), {
+  assert.deepEqual(activateTheme("paper-atlas", "manjyun-console"), {
     activeTheme: "paper-atlas",
     previousTheme: "manjyun-console"
   });
-  assert.deepEqual(activateTheme("paper-atlas"), {
+  assert.deepEqual(activateTheme("paper-atlas", "manjyun-console"), {
     activeTheme: "paper-atlas",
     previousTheme: "manjyun-console"
   });
-  assert.deepEqual(rollbackTheme(), {
-    activeTheme: "manjyun-console",
-    previousTheme: "paper-atlas"
-  });
-  assert.deepEqual(rollbackTheme(), {
-    activeTheme: "paper-atlas",
-    previousTheme: "manjyun-console"
-  });
-  assert.deepEqual(activateTheme("manjyun-console"), {
+  assert.deepEqual(
+    rollbackTheme("manjyun-console", "paper-atlas"),
+    {
+      activeTheme: "manjyun-console",
+      previousTheme: "paper-atlas"
+    }
+  );
+  assert.deepEqual(
+    rollbackTheme("manjyun-console", "paper-atlas"),
+    {
+      activeTheme: "manjyun-console",
+      previousTheme: "paper-atlas"
+    }
+  );
+  assert.throws(
+    () => activateTheme("paper-atlas", "neon-rift"),
+    (error: unknown) => error instanceof ThemeSelectionConflictError
+  );
+  assert.deepEqual(
+    rollbackTheme("paper-atlas", "manjyun-console"),
+    {
+      activeTheme: "paper-atlas",
+      previousTheme: "manjyun-console"
+    }
+  );
+  assert.deepEqual(activateTheme("manjyun-console", "paper-atlas"), {
     activeTheme: "manjyun-console",
     previousTheme: "paper-atlas"
   });
@@ -97,6 +122,42 @@ test("post publishing preserves first publish time and safe revision history", a
   });
   assert.equal(legacyPage.type, "page");
   assert.equal(legacyPage.slug, "pages-001");
+  assert.deepEqual(
+    listAdminPages().map((page) => ({
+      slug: page.slug,
+      status: page.status
+    })),
+    [
+      { slug: "pages-001", status: "draft" },
+      { slug: "about", status: "published" }
+    ]
+  );
+  const { createCustomPageIdempotently } = await import("@/lib/admin/custom-pages");
+  const createPageKey = "page-create-test-key-0001";
+  const createdPage = createCustomPageIdempotently({
+    idempotencyKey: createPageKey,
+    title: "Idempotent Page",
+    slug: "idempotent-page"
+  });
+  const replayedPage = createCustomPageIdempotently({
+    idempotencyKey: createPageKey,
+    title: "Idempotent Page",
+    slug: "idempotent-page"
+  });
+  assert.equal(replayedPage.replayed, true);
+  assert.equal(replayedPage.response.id, createdPage.response.id);
+  assert.equal(
+    listAdminPages().filter((page) => page.slug === "idempotent-page").length,
+    1
+  );
+  assert.throws(
+    () => createCustomPageIdempotently({
+      idempotencyKey: createPageKey,
+      title: "Different Page",
+      slug: "different-page"
+    }),
+    { name: "IdempotencyConflictError" }
+  );
   assert.deepEqual(contentStatusCounts(), {
     all: 3,
     published: 1,
@@ -148,7 +209,7 @@ test("post publishing preserves first publish time and safe revision history", a
     status: "published",
     tags: ["PagedSearch"]
   });
-  const { run: runDb } = await import("@/lib/db/client");
+  const { get: getDbRow, run: runDb } = await import("@/lib/db/client");
   runDb("UPDATE posts SET updated_at = ? WHERE id = ?", [
     "2026-03-03T00:00:00.000Z",
     summaryTitleMatch.id
@@ -229,6 +290,43 @@ test("post publishing preserves first publish time and safe revision history", a
     tags: []
   });
   assert.ok(published.publishedAt);
+  assert.equal(published.version, 1);
+
+  const firstConcurrentSave = savePost({
+    id: published.id,
+    expectedVersion: published.version,
+    type: "post",
+    title: "Revision Anchor",
+    slug: "revision-anchor",
+    markdown: "first concurrent save",
+    status: "published",
+    tags: []
+  });
+  assert.equal(firstConcurrentSave.version, published.version + 1);
+  runDb("UPDATE posts SET updated_at = ? WHERE id = ?", [
+    published.updatedAt,
+    published.id
+  ]);
+  assert.equal(getPostById(published.id)?.updatedAt, published.updatedAt);
+  assert.throws(
+    () =>
+      savePost({
+        id: published.id,
+        expectedVersion: published.version,
+        type: "post",
+        title: "Stale overwrite",
+        slug: "revision-anchor",
+        markdown: "stale concurrent save",
+        status: "draft",
+        tags: []
+      }),
+    (error: unknown) =>
+      error instanceof Error &&
+      "code" in error &&
+      error.code === "VERSION_CONFLICT"
+  );
+  assert.equal(getPostById(published.id)?.markdown, "first concurrent save");
+  assert.equal(getPostById(published.id)?.status, "published");
 
   const firstPublishedAt = published.publishedAt;
   assert.equal(setPostStatus(published.id, "draft")?.publishedAt, firstPublishedAt);
@@ -362,6 +460,62 @@ test("post publishing preserves first publish time and safe revision history", a
   assert.equal(restoredDraft?.status, "draft");
   assert.equal(restoredDraft?.markdown, "published body");
 
+  let pagedRevisionPost = savePost({
+    type: "post",
+    title: "Long Revision History",
+    slug: "long-revision-history",
+    markdown: "revision 0",
+    status: "draft",
+    tags: []
+  });
+  for (let index = 1; index <= 25; index += 1) {
+    pagedRevisionPost = savePost({
+      id: pagedRevisionPost.id,
+      expectedVersion: pagedRevisionPost.version,
+      type: "post",
+      title: pagedRevisionPost.title,
+      slug: pagedRevisionPost.slug,
+      markdown: `revision ${index}`,
+      status: "draft",
+      tags: []
+    });
+  }
+  runDb(
+    "UPDATE post_revisions SET created_at = ? WHERE post_id = ?",
+    ["2026-07-20T00:00:00.000Z", pagedRevisionPost.id]
+  );
+
+  const revisionIds: number[] = [];
+  let revisionCursor: string | null = null;
+  let revisionPageNumber = 0;
+  do {
+    const page = listPostRevisionPage(pagedRevisionPost.id, {
+      cursor: revisionCursor,
+      limit: 7
+    });
+    assert.equal(page.total, 25);
+    assert.ok(page.revisions.length <= 7);
+    revisionIds.push(...page.revisions.map((revision) => revision.id));
+    revisionCursor = page.nextCursor;
+    revisionPageNumber += 1;
+    assert.equal(page.hasMore, revisionCursor !== null);
+  } while (revisionCursor);
+  assert.equal(revisionPageNumber, 4);
+  assert.equal(revisionIds.length, 25);
+  assert.equal(new Set(revisionIds).size, 25);
+  assert.deepEqual(
+    revisionIds,
+    listPostRevisions(pagedRevisionPost.id, 50).map((revision) => revision.id)
+  );
+  assert.throws(
+    () =>
+      listPostRevisionPage(pagedRevisionPost.id, {
+        cursor: "malformed",
+        limit: 7
+      }),
+    RangeError
+  );
+
   const cpp = savePost({
     type: "post",
     title: "C++",
@@ -409,7 +563,89 @@ test("post publishing preserves first publish time and safe revision history", a
   assert.ok(draftOnly.tags.some((tag) => tag.slug === "draftonly"));
   assert.equal(getTagBySlug("draftonly"), null);
 
-  const originalSiteTitle = getSiteSettings().siteTitle;
+  const sharedTagA = savePost({
+    type: "post",
+    title: "Shared tag A",
+    markdown: "a",
+    status: "draft",
+    tags: ["DeleteCleanup"]
+  });
+  const sharedTagB = savePost({
+    type: "post",
+    title: "Shared tag B",
+    markdown: "b",
+    status: "draft",
+    tags: ["DeleteCleanup"]
+  });
+  assert.equal(
+    getDbRow<{ count: number }>(
+      "SELECT COUNT(*) AS count FROM tags WHERE name = ?",
+      ["DeleteCleanup"]
+    )?.count,
+    1
+  );
+  assert.equal(
+    deletePostPermanently(sharedTagA.id, sharedTagA.version),
+    true
+  );
+  assert.equal(
+    getDbRow<{ count: number }>(
+      "SELECT COUNT(*) AS count FROM tags WHERE name = ?",
+      ["DeleteCleanup"]
+    )?.count,
+    1
+  );
+  assert.equal(
+    deletePostPermanently(sharedTagB.id, sharedTagB.version),
+    true
+  );
+  assert.equal(
+    getDbRow<{ count: number }>(
+      "SELECT COUNT(*) AS count FROM tags WHERE name = ?",
+      ["DeleteCleanup"]
+    )?.count,
+    0
+  );
+
+  const configuration = getSiteConfiguration();
+  runDb(
+    "INSERT INTO home_modules (id, enabled, sort_order, config) VALUES (?, ?, ?, ?)",
+    ["legacy-unknown", 1, 999, "{}"]
+  );
+  const firstConfigurationSave = updateSiteConfiguration(
+    {
+      settings: { siteTitle: "Concurrent settings winner" },
+      modules: configuration.modules,
+      mainLinks: configuration.mainLinks,
+      frequentLinks: configuration.frequentLinks
+    },
+    configuration.version
+  );
+  assert.equal(firstConfigurationSave.version, configuration.version + 1);
+  assert.equal(
+    getHomeModules().some((module) => module.id === "legacy-unknown"),
+    false
+  );
+  assert.throws(
+    () =>
+      updateSiteConfiguration(
+        {
+          settings: { siteDescription: "stale settings overwrite" },
+          modules: configuration.modules,
+          mainLinks: configuration.mainLinks,
+          frequentLinks: configuration.frequentLinks
+        },
+        configuration.version
+      ),
+    (error: unknown) =>
+      error instanceof Error &&
+      "code" in error &&
+      error.code === "VERSION_CONFLICT"
+  );
+  assert.equal(getSiteSettings().siteTitle, "Concurrent settings winner");
+  assert.notEqual(getSiteSettings().siteDescription, "stale settings overwrite");
+
+  const versionBeforeRollback = firstConfigurationSave.version;
   assert.throws(() =>
     updateSiteConfiguration({
       settings: { siteTitle: "Must roll back" },
@@ -425,7 +661,8 @@ test("post publishing preserves first publish time and safe revision history", a
       frequentLinks: []
     })
   );
-  assert.equal(getSiteSettings().siteTitle, originalSiteTitle);
+  assert.equal(getSiteSettings().siteTitle, "Concurrent settings winner");
+  assert.equal(getSiteConfiguration().version, versionBeforeRollback);
 
   replaceNavLinks("main", []);
   const { getDb } = await import("@/lib/db/client");

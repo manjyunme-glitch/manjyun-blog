@@ -11,16 +11,40 @@ export const editableSiteSettingKeys = [
   "blogTitle",
   "blogDescription",
   "projectsTitle",
-  "projectsDescription",
-  "aboutTitle",
-  "aboutMarkdown"
+  "projectsDescription"
 ] as const satisfies ReadonlyArray<Exclude<keyof SiteSettings, "activeTheme">>;
 
 type EditableSettingKey = (typeof editableSiteSettingKeys)[number];
 export type EditableSiteSettings = Pick<SiteSettings, EditableSettingKey>;
 export type LinkInput = Omit<NavLink, "id" | "groupName">;
+export type FieldErrors = Record<string, string[]>;
 
 const moduleIds = new Set(["recentPosts", "now", "projects", "frequentLinks", "stack"]);
+
+export function isValidCalendarDate(value: string) {
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return false;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (month < 1 || month > 12 || day < 1) return false;
+  const leapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const daysInMonth = [
+    31,
+    leapYear ? 29 : 28,
+    31,
+    30,
+    31,
+    30,
+    31,
+    31,
+    30,
+    31,
+    30,
+    31
+  ];
+  return day <= daysInMonth[month - 1];
+}
 
 function validPublicUrl(value: string) {
   if (value.startsWith("/") && !value.startsWith("//")) return true;
@@ -51,6 +75,12 @@ export function validateSiteConfigurationPayload(input: {
   frequentLinks?: unknown;
 }) {
   const issues: string[] = [];
+  const fieldErrors: FieldErrors = {};
+  function addIssue(field: string, message: string) {
+    issues.push(message);
+    fieldErrors[field] = [...(fieldErrors[field] ?? []), message];
+  }
+
   const source = input.settings && typeof input.settings === "object" && !Array.isArray(input.settings)
     ? input.settings as Record<string, unknown>
     : {};
@@ -59,32 +89,34 @@ export function validateSiteConfigurationPayload(input: {
     settings[key] = String(source[key] ?? "") as never;
   }
 
-  if (!settings.siteTitle.trim()) issues.push("站点标题不能为空。");
-  if (settings.siteTitle.length > 120) issues.push("站点标题不能超过 120 个字符。");
+  if (!settings.siteTitle.trim()) addIssue("settings.siteTitle", "站点标题不能为空。");
+  if (settings.siteTitle.length > 120) addIssue("settings.siteTitle", "站点标题不能超过 120 个字符。");
   try {
     const baseUrl = new URL(settings.baseUrl);
     if (!["http:", "https:"].includes(baseUrl.protocol) || baseUrl.username || baseUrl.password) throw new Error();
   } catch {
-    issues.push("站点 URL 必须是没有账号信息的 HTTP(S) 绝对地址。");
+    addIssue("settings.baseUrl", "站点 URL 必须是没有账号信息的 HTTP(S) 绝对地址。");
   }
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(settings.uptimeStart) || Number.isNaN(Date.parse(`${settings.uptimeStart}T00:00:00Z`))) {
-    issues.push("Uptime 起始日期必须是有效的 YYYY-MM-DD 日期。");
+  if (!isValidCalendarDate(settings.uptimeStart)) {
+    addIssue("settings.uptimeStart", "Uptime 起始日期必须是有效的 YYYY-MM-DD 日期。");
   }
-  if (!settings.blogTitle.trim() || !settings.projectsTitle.trim() || !settings.aboutTitle.trim()) {
-    issues.push("随笔、项目和 About 页面标题不能为空。");
-  }
-  if (settings.aboutMarkdown.length > 200_000) issues.push("About Markdown 不能超过 200,000 个字符。");
-
+  if (!settings.blogTitle.trim()) addIssue("settings.blogTitle", "随笔页面标题不能为空。");
+  if (!settings.projectsTitle.trim()) addIssue("settings.projectsTitle", "项目页面标题不能为空。");
   const modules = Array.isArray(input.modules)
     ? input.modules.map((raw) => {
         const module = raw as Partial<HomeModule>;
         const id = String(module.id ?? "");
         const config = module.config && typeof module.config === "object" ? { ...module.config } : {};
-        if (!moduleIds.has(id)) issues.push(`未知首页模块：${id || "(空)"}。`);
+        if (!moduleIds.has(id)) {
+          addIssue(`modules.${id || "unknown"}`, `未知首页模块：${id || "(空)"}。`);
+        }
         if (id === "recentPosts" || id === "projects") {
           const limit = Number(config.limit ?? 8);
           if (!Number.isInteger(limit) || limit < 1 || limit > 50) {
-            issues.push(`${id} 的显示数量必须是 1 到 50 的整数。`);
+            addIssue(
+              `modules.${id}.config.limit`,
+              `${id} 的显示数量必须是 1 到 50 的整数。`
+            );
           } else {
             config.limit = limit;
           }
@@ -98,10 +130,10 @@ export function validateSiteConfigurationPayload(input: {
       })
     : [];
   if (modules.length !== moduleIds.size || new Set(modules.map((module) => module.id)).size !== modules.length) {
-    issues.push("首页模块列表不完整或包含重复项。");
+    addIssue("modules", "首页模块列表不完整或包含重复项。");
   }
 
-  function cleanLinks(raw: unknown, label: string): LinkInput[] {
+  function cleanLinks(raw: unknown, label: string, field: "mainLinks" | "frequentLinks"): LinkInput[] {
     if (!Array.isArray(raw)) return [];
     const links = raw.map((item, index) => {
       const link = item as Record<string, unknown>;
@@ -111,20 +143,33 @@ export function validateSiteConfigurationPayload(input: {
         iconUrl: String(link.iconUrl ?? "").trim() || null,
         sortOrder: (index + 1) * 10
       };
-      if (!value.label) issues.push(`${label}第 ${index + 1} 项缺少名称。`);
-      if (!validPublicUrl(value.url)) issues.push(`${label}“${value.label || index + 1}”的 URL 必须是站内路径或 HTTP(S) 地址。`);
-      if (value.iconUrl && !validPublicUrl(value.iconUrl)) issues.push(`${label}“${value.label || index + 1}”的图标 URL 无效。`);
+      if (!value.label) {
+        addIssue(`${field}.${index}.label`, `${label}第 ${index + 1} 项缺少名称。`);
+      }
+      if (!validPublicUrl(value.url)) {
+        addIssue(
+          `${field}.${index}.url`,
+          `${label}“${value.label || index + 1}”的 URL 必须是站内路径或 HTTP(S) 地址。`
+        );
+      }
+      if (value.iconUrl && !validPublicUrl(value.iconUrl)) {
+        addIssue(
+          `${field}.${index}.iconUrl`,
+          `${label}“${value.label || index + 1}”的图标 URL 无效。`
+        );
+      }
       return value;
     });
-    return links.filter((link) => link.label && link.url);
+    return links;
   }
 
-  const mainLinks = cleanLinks(input.mainLinks, "主导航");
-  const frequentLinks = cleanLinks(input.frequentLinks, "常用链接");
+  const mainLinks = cleanLinks(input.mainLinks, "主导航", "mainLinks");
+  const frequentLinks = cleanLinks(input.frequentLinks, "常用链接", "frequentLinks");
 
   return {
     ok: issues.length === 0,
     issues,
+    fieldErrors,
     value: {
       settings,
       modules: normalizeOrder([...modules].sort((a, b) => a.sortOrder - b.sortOrder)),

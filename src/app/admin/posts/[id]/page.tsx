@@ -3,7 +3,7 @@ import Link from "next/link";
 import { AdminFrame } from "@/components/admin/AdminFrame";
 import { AdminEditor } from "@/components/admin/AdminEditor";
 import { requireAdmin } from "@/lib/auth/session";
-import { getPostById, listPostRevisions } from "@/lib/db/queries";
+import { getPostById, listPostRevisionPage } from "@/lib/db/queries";
 import { CONTENT_TYPE_DEFINITIONS, type AdminContentType } from "@/lib/content/content-types";
 
 export const dynamic = "force-dynamic";
@@ -30,7 +30,7 @@ export default async function EditPostPage({
   const { id } = await params;
   const post = getPostById(Number(id));
   if (!post) notFound();
-  const revisions = listPostRevisions(post.id);
+  const revisionPage = listPostRevisionPage(post.id);
   const returnHref = statusHref(post.status, post.type === "page" ? undefined : post.type);
   const returnLabel = `返回${statusLabels[post.status]}列表`;
 
@@ -44,7 +44,6 @@ export default async function EditPostPage({
         { label: statusLabels[post.status], href: returnHref },
         { label: post.title }
       ]}
-      activeNav={returnHref}
       action={
         <div className="btn-row">
           <Link className="btn" href={returnHref}>{returnLabel}</Link>
@@ -52,7 +51,12 @@ export default async function EditPostPage({
         </div>
       }
     >
-      <AdminEditor post={post} revisions={revisions} backHref={returnHref} backLabel={returnLabel} />
+      <AdminEditor
+        post={post}
+        revisionPage={revisionPage}
+        backHref={returnHref}
+        backLabel={returnLabel}
+      />
     </AdminFrame>
   );
 }

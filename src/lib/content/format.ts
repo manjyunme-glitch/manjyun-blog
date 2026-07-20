@@ -35,6 +35,16 @@ export function formatDateTime(input: string | null | undefined) {
     .replaceAll("/", "-");
 }
 
+export function formatYear(input: string | null | undefined) {
+  if (!input) return "";
+  const parsed = parseStoredDate(input);
+  if (Number.isNaN(parsed.getTime())) return "";
+  return new Intl.DateTimeFormat("en", {
+    timeZone: BEIJING_TIME_ZONE,
+    year: "numeric"
+  }).format(parsed);
+}
+
 export function hostFromUrl(url: string) {
   try {
     return new URL(url, "http://localhost").hostname.replace(/^www\./, "");

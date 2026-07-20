@@ -29,13 +29,6 @@ const statusLabels: Record<AdminContentStatusFilter, string> = {
   trashed: "回收站"
 };
 
-const statusNav: Record<AdminContentStatusFilter, string> = {
-  all: "/admin/posts",
-  published: "/admin/posts?status=published",
-  draft: "/admin/posts?status=draft",
-  trashed: "/admin/posts?status=trashed"
-};
-
 function filterTitle(type: AdminContentTypeFilter, status: AdminContentStatusFilter) {
   if (type === "all") return statusLabels[status];
   const typeLabel = CONTENT_TYPE_DEFINITIONS[type].label;
@@ -101,7 +94,6 @@ export default async function AdminPostsPage({
         { label: "内容", href: "/admin/posts" },
         { label: title }
       ]}
-      activeNav={statusNav[currentStatus]}
       action={<Link className="btn primary" href="/admin/posts/new">新建内容</Link>}
     >
       <AdminContentTable

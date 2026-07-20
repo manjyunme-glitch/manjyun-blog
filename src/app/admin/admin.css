@@ -549,7 +549,8 @@
     gap: 0.32rem;
   }
 
-  .field label {
+  .field label,
+  .field-label {
     color: var(--muted);
     font-family: var(--mono);
     font-size: 0.72rem;
@@ -1058,7 +1059,8 @@
     gap: 0.32rem;
   }
 
-  .content-tags a {
+  .content-tags a,
+  .content-tags > span {
     max-width: 8rem;
     overflow: hidden;
     padding: 0.13rem 0.4rem;
@@ -1070,6 +1072,10 @@
     line-height: 1.35;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .content-tags > span {
+    opacity: 0.72;
   }
 
   .content-tags a:hover {

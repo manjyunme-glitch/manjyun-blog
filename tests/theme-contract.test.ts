@@ -1,17 +1,20 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import test from "node:test";
+import { renderToStaticMarkup } from "react-dom/server";
 import { getThemeContractIssues } from "@/lib/themes/contract";
 import { resolveThemeMutation } from "@/lib/themes/selection";
 import {
+  presentCollection,
   presentEntrySummary,
+  presentHome,
   presentNavigation,
   presentPage
 } from "@/lib/themes/presenter";
 import { manjyunConsoleTheme } from "@/themes/manjyun-console";
 import { neonRiftTheme } from "@/themes/neon-rift";
-import { paperAtlasTheme } from "@/themes/paper-atlas";
-import type { NavLink, PostRecord, SiteSettings } from "@/types/blog";
+import { paperArchiveYear, paperAtlasTheme } from "@/themes/paper-atlas";
+import type { HomeModule, NavLink, PostRecord, SiteSettings } from "@/types/blog";
 
 const post: PostRecord = {
   id: 42,
@@ -27,6 +30,7 @@ const post: PostRecord = {
   seoDescription: null,
   createdAt: "2026-07-09T08:00:00.000Z",
   updatedAt: "2026-07-10T08:00:00.000Z",
+  version: 1,
   tags: [{ id: 7, slug: "theme-sdk", name: "Theme SDK" }]
 };
 
@@ -116,15 +120,28 @@ test("theme mutation accepts only compiled compatible themes and valid rollback 
   const available = ["manjyun-console", "paper-atlas"];
   assert.deepEqual(
     resolveThemeMutation(
-      { action: "activate", themeId: "paper-atlas" },
+      {
+        action: "activate",
+        themeId: "paper-atlas",
+        expectedActiveTheme: "manjyun-console"
+      },
       { activeTheme: "manjyun-console", previousTheme: null },
       available
     ),
-    { ok: true, action: "activate", targetTheme: "paper-atlas" }
+    {
+      ok: true,
+      action: "activate",
+      targetTheme: "paper-atlas",
+      expectedActiveTheme: "manjyun-console"
+    }
   );
 
   const uncompiled = resolveThemeMutation(
-    { action: "activate", themeId: "manifest-only" },
+    {
+      action: "activate",
+      themeId: "manifest-only",
+      expectedActiveTheme: "manjyun-console"
+    },
     { activeTheme: "manjyun-console", previousTheme: null },
     available
   );
@@ -133,20 +150,45 @@ test("theme mutation accepts only compiled compatible themes and valid rollback 
 
   assert.deepEqual(
     resolveThemeMutation(
-      { action: "rollback" },
+      {
+        action: "rollback",
+        themeId: "manjyun-console",
+        expectedActiveTheme: "paper-atlas"
+      },
       { activeTheme: "paper-atlas", previousTheme: "manjyun-console" },
       available
     ),
-    { ok: true, action: "rollback", targetTheme: "manjyun-console" }
+    {
+      ok: true,
+      action: "rollback",
+      targetTheme: "manjyun-console",
+      expectedActiveTheme: "paper-atlas"
+    }
   );
 
   const incompatibleRollback = resolveThemeMutation(
-    { action: "rollback" },
+    {
+      action: "rollback",
+      themeId: "removed-theme",
+      expectedActiveTheme: "paper-atlas"
+    },
     { activeTheme: "paper-atlas", previousTheme: "removed-theme" },
     available
   );
   assert.equal(incompatibleRollback.ok, false);
   assert.equal(incompatibleRollback.ok ? 0 : incompatibleRollback.status, 409);
+
+  const staleRollback = resolveThemeMutation(
+    {
+      action: "rollback",
+      themeId: "manjyun-console",
+      expectedActiveTheme: "paper-atlas"
+    },
+    { activeTheme: "neon-rift", previousTheme: "paper-atlas" },
+    [...available, "neon-rift"]
+  );
+  assert.equal(staleRollback.ok, false);
+  assert.equal(staleRollback.ok ? 0 : staleRollback.status, 409);
 });
 
 test("presenter owns content URLs, labels, dates, tags and navigation state", () => {
@@ -203,6 +245,132 @@ test("neon rift consumes stable view models without rebuilding business URLs", (
   assert.match(source, /aria-current=\{item\.isCurrent/);
 });
 
+test("collection pagination preserves the theme contract and canonical page links", () => {
+  const model = presentCollection({
+    settings,
+    navLinks,
+    title: "随笔",
+    description: "分页列表",
+    href: "/posts",
+    posts: [post],
+    pagination: {
+      page: 2,
+      totalPages: 3,
+      total: 25
+    }
+  });
+
+  assert.equal(model.countLabel, "25 entries");
+  assert.deepEqual(model.pagination, {
+    label: "第 2 / 3 页",
+    currentPage: 2,
+    totalPages: 3,
+    previous: {
+      label: "上一页",
+      href: "/posts",
+      isExternal: false
+    },
+    next: {
+      label: "下一页",
+      href: "/posts?page=3",
+      isExternal: false
+    }
+  });
+
+  for (const theme of [manjyunConsoleTheme, paperAtlasTheme, neonRiftTheme]) {
+    const html = renderToStaticMarkup(theme.slots.Collection({ model }));
+    assert.match(html, /aria-label="集合分页"/);
+    assert.match(html, /href="\/posts"/);
+    assert.match(html, /href="\/posts\?page=3"/);
+    assert.match(html, /aria-current="page">第 2 \/ 3 页/);
+  }
+});
+
+test("neon rift serves responsive modern tower assets within a bounded byte budget", () => {
+  const source = readFileSync(
+    new URL("../src/themes/neon-rift/index.tsx", import.meta.url),
+    "utf8"
+  );
+  assert.match(source, /type="image\/avif"/);
+  assert.match(source, /type="image\/webp"/);
+  assert.match(source, /signal-tower-432\.avif 432w/);
+  assert.match(source, /signal-tower-864\.avif 864w/);
+  assert.match(source, /signal-tower-432\.webp 432w/);
+  assert.match(source, /signal-tower-864\.webp 864w/);
+
+  const assets = [
+    ["signal-tower.png", 450_000],
+    ["signal-tower-432.avif", 50_000],
+    ["signal-tower-864.avif", 100_000],
+    ["signal-tower-432.webp", 75_000],
+    ["signal-tower-864.webp", 175_000]
+  ] as const;
+  for (const [filename, maximumBytes] of assets) {
+    const asset = new URL(
+      `../public/themes/neon-rift/${filename}`,
+      import.meta.url
+    );
+    assert.ok(
+      statSync(asset).size <= maximumBytes,
+      `${filename} should stay at or below ${maximumBytes} bytes`
+    );
+  }
+});
+
+test("paper archive groups boundary timestamps in the displayed Shanghai year", () => {
+  assert.equal(
+    paperArchiveYear("2025-12-31T16:30:00.000Z", "2026-01-01"),
+    "2026"
+  );
+  assert.equal(
+    paperArchiveYear("2026-12-31T15:59:59.999Z", "2026-12-31"),
+    "2026"
+  );
+  assert.equal(
+    paperArchiveYear("2026-12-31T18:00:00.000Z", "2027-01-01"),
+    "2027"
+  );
+  assert.equal(paperArchiveYear("not-a-date", "legacy-label"), "lega");
+});
+
+test("all public themes preserve configured home modules in DOM and mobile reading order", () => {
+  const modules: HomeModule[] = [
+    { id: "now", enabled: true, sortOrder: 40, config: {} },
+    { id: "projects", enabled: true, sortOrder: 50, config: {} },
+    { id: "frequentLinks", enabled: true, sortOrder: 10, config: {} },
+    { id: "stack", enabled: true, sortOrder: 30, config: {} },
+    { id: "recentPosts", enabled: true, sortOrder: 20, config: {} }
+  ];
+  const model = presentHome({
+    settings,
+    navLinks,
+    frequentLinks: [],
+    modules,
+    posts: [post],
+    projects: []
+  });
+  const expectedOrder = [
+    "frequentLinks",
+    "recentPosts",
+    "stack",
+    "now",
+    "projects"
+  ];
+
+  for (const theme of [manjyunConsoleTheme, paperAtlasTheme, neonRiftTheme]) {
+    const html = renderToStaticMarkup(theme.slots.Home({ model }));
+    const renderedOrder = Array.from(
+      html.matchAll(/data-home-module="([^"]+)"/g),
+      (match) => match[1]
+    );
+    assert.deepEqual(
+      renderedOrder,
+      expectedOrder,
+      `${theme.meta.id} must render modules in presenter order`
+    );
+  }
+});
+
 test("neon rift keeps its article toc sticky and its telemetry readable", () => {
   const source = readFileSync(
     new URL("../src/themes/neon-rift/theme.css", import.meta.url),
@@ -244,6 +412,41 @@ test("public themes style viewport and nested scrollbars with their own palette"
     assert.ok(
       source.includes(`scrollbar-color: ${standardColors}`),
       `${themeId} should include a standards-based scrollbar fallback`
+    );
+  }
+});
+
+test("all public themes style the sanitized rich-content DOM contract", () => {
+  const themes = ["manjyun-console", "paper-atlas", "neon-rift"] as const;
+  const requiredClasses = [
+    "mj-code-block",
+    "mj-audio-card",
+    "mj-audio-meta",
+    "mj-bookmark-card",
+    "mj-callout-card",
+    "table-scroll"
+  ];
+
+  for (const themeId of themes) {
+    const source = readFileSync(
+      new URL(`../src/themes/${themeId}/theme.css`, import.meta.url),
+      "utf8"
+    );
+    for (const className of requiredClasses) {
+      assert.ok(
+        source.includes(`.${className}`),
+        `${themeId} must style .${className}`
+      );
+    }
+    assert.match(
+      source,
+      /\.table-scroll\s*\{[^}]*overflow-x:\s*auto/,
+      `${themeId} must contain wide tables instead of widening the viewport`
+    );
+    assert.match(
+      source,
+      /\.table-scroll table\s*\{[^}]*width:\s*max-content[^}]*min-width:\s*100%/,
+      `${themeId} must let wide tables create an inner horizontal scroller`
     );
   }
 });

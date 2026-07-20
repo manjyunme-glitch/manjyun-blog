@@ -4,6 +4,12 @@ import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { NextResponse } from "next/server";
 import { requireAdminForApi } from "@/lib/auth/session";
+import {
+  classifyDeploymentState,
+  hasUpdateAvailable,
+  sameCommit,
+  type GitHubComparisonStatus
+} from "@/lib/deployment/status";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -23,8 +29,6 @@ type CommitInfo = {
   source: CommitSource;
 };
 
-type DeploymentState = "current" | "update-available" | "unknown";
-
 type GitHubCommitResponse = {
   sha: string;
   html_url: string;
@@ -33,6 +37,10 @@ type GitHubCommitResponse = {
     committer?: { date?: string };
     author?: { date?: string };
   };
+};
+
+type GitHubComparisonResponse = {
+  status: GitHubComparisonStatus;
 };
 
 type BuildInfo = {
@@ -243,13 +251,41 @@ async function githubCommit(repository: string, ref: string) {
   return (await response.json()) as GitHubCommitResponse;
 }
 
-function stateFrom(current: CommitInfo, remote: CommitInfo | null): DeploymentState {
-  if (!current.sha || !remote?.sha) return "unknown";
-  if (current.sha === remote.sha) return "current";
-  if (remote.sha.startsWith(current.sha) || current.sha.startsWith(remote.sha)) {
-    return "current";
+async function githubComparison(
+  repository: string,
+  remoteSha: string,
+  currentSha: string
+) {
+  const headers: HeadersInit = {
+    Accept: "application/vnd.github+json",
+    "User-Agent": "manjyun-blog-deployment-status"
+  };
+  if (process.env.GITHUB_TOKEN) {
+    headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
   }
-  return "update-available";
+
+  const controller = new AbortController();
+  const response = await withTimeout(
+    fetch(
+      `https://api.github.com/repos/${repository}/compare/${encodeURIComponent(remoteSha)}...${encodeURIComponent(currentSha)}`,
+      { cache: "no-store", headers, signal: controller.signal }
+    ),
+    5000,
+    () => controller.abort()
+  );
+  if (!response.ok) {
+    throw new Error(`GitHub comparison returned ${response.status}`);
+  }
+  const data = (await response.json()) as Partial<GitHubComparisonResponse>;
+  if (
+    data.status !== "identical" &&
+    data.status !== "ahead" &&
+    data.status !== "behind" &&
+    data.status !== "diverged"
+  ) {
+    throw new Error("GitHub comparison returned an unknown relationship");
+  }
+  return data.status;
 }
 
 function unknownCurrent(): CommitInfo {
@@ -300,13 +336,34 @@ export async function GET() {
     error = issue instanceof Error ? issue.message : "GitHub check failed";
   }
 
+  let comparisonStatus: GitHubComparisonStatus | null = null;
+  if (current.sha && remote?.sha && !sameCommit(current.sha, remote.sha)) {
+    try {
+      comparisonStatus = await githubComparison(
+        repository,
+        remote.sha,
+        current.sha
+      );
+    } catch (issue) {
+      const comparisonError =
+        issue instanceof Error ? issue.message : "GitHub comparison failed";
+      error = error ? `${error}; ${comparisonError}` : comparisonError;
+    }
+  }
+  const state = classifyDeploymentState(
+    current.sha,
+    remote?.sha,
+    comparisonStatus
+  );
+
   return NextResponse.json({
     ok: true,
     checkedAt,
     repository,
     branch,
     commitsUrl: commitsUrl(repository, branch),
-    state: stateFrom(current, remote),
+    state,
+    updateAvailable: hasUpdateAvailable(state),
     current,
     remote,
     error

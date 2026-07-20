@@ -1,6 +1,10 @@
 import type { MetadataRoute } from "next";
 import { contentHref } from "@/lib/content/content-types";
-import { getSiteSettings, getTags, listPosts } from "@/lib/db/queries";
+import {
+  getSiteSettings,
+  getTags,
+  listPublishedSitemapEntries
+} from "@/lib/db/queries";
 import { absoluteSiteUrl } from "@/lib/seo/metadata";
 import type { PostType } from "@/types/blog";
 
@@ -14,14 +18,8 @@ export default function sitemap(): MetadataRoute.Sitemap {
   add({ url: absoluteSiteUrl(settings, "/"), changeFrequency: "weekly", priority: 1 });
   add({ url: absoluteSiteUrl(settings, "/posts"), changeFrequency: "weekly", priority: 0.8 });
   add({ url: absoluteSiteUrl(settings, "/projects"), changeFrequency: "monthly", priority: 0.7 });
-  add({ url: absoluteSiteUrl(settings, "/about"), changeFrequency: "monthly", priority: 0.5 });
-
   for (const type of ["post", "project", "page"] satisfies PostType[]) {
-    for (const post of listPosts({
-      type,
-      status: "published",
-      includeTags: false
-    })) {
+    for (const post of listPublishedSitemapEntries(type)) {
       add({
         url: absoluteSiteUrl(settings, contentHref(post.type, post.slug)),
         lastModified: new Date(post.updatedAt),

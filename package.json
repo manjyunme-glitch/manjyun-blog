@@ -8,9 +8,10 @@
     "build": "next build",
     "postbuild": "node scripts/prune-standalone.mjs",
     "start": "next start",
+    "admin:reset-password": "node scripts/reset-admin-password.mjs",
     "check": "tsc --noEmit",
     "test": "tsx --test tests/*.test.ts",
-    "test:e2e": "playwright test tests/e2e.spec.js --reporter=line"
+    "test:e2e": "node scripts/run-e2e.mjs"
   },
   "dependencies": {
     "clsx": "^2.1.1",

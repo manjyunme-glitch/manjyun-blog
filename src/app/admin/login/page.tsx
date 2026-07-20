@@ -24,14 +24,14 @@ export default async function LoginPage({
           <h1 className="admin-title">登录 ManJyun Admin</h1>
           <p className="admin-subtitle">进入共享工作台，管理内容、媒体、外观和站点设置。</p>
         </div>
-        {error ? <p className="admin-notice error" role="alert" tabIndex={-1}>{decodeURIComponent(error)}</p> : null}
+        {error ? <p className="admin-notice error" role="alert" tabIndex={-1}>{error}</p> : null}
         <div className="field">
           <label htmlFor="login-username">用户名</label>
-          <input id="login-username" className="input" name="username" autoComplete="username" autoFocus required />
+          <input id="login-username" className="input" name="username" autoComplete="username" maxLength={128} autoFocus required />
         </div>
         <div className="field">
           <label htmlFor="login-password">密码</label>
-          <input id="login-password" className="input" name="password" type="password" autoComplete="current-password" required />
+          <input id="login-password" className="input" name="password" type="password" autoComplete="current-password" maxLength={1024} required />
         </div>
         <button className="btn primary" type="submit">
           登录

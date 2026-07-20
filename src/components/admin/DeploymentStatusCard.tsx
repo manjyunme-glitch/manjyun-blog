@@ -18,7 +18,8 @@ type DeploymentStatus = {
   repository: string;
   branch: string;
   commitsUrl: string;
-  state: "current" | "update-available" | "unknown";
+  state: "current" | "behind" | "ahead" | "diverged" | "unknown";
+  updateAvailable: boolean;
   current: CommitInfo;
   remote: CommitInfo | null;
   error: string | null;
@@ -38,8 +39,8 @@ const initialCurrent: CommitInfo = {
   source: "unknown"
 };
 
-const statusCacheKey = "manjyun:deployment-status:last-check";
-const autoCheckKey = "manjyun:deployment-status:auto-checked";
+const statusCacheKey = "manjyun:deployment-status:last-check:v2";
+const autoCheckKey = "manjyun:deployment-status:auto-checked:v2";
 
 function readCachedDeploymentStatus() {
   if (typeof window === "undefined") return null;
@@ -62,14 +63,17 @@ function stateLabel(status: DeploymentStatus | null, pending: boolean, error: st
   if (error) return "检查失败";
   if (!status) return "未检查";
   if (status.state === "current") return "已同步";
-  if (status.state === "update-available") return "可更新";
+  if (status.state === "behind") return "可更新";
+  if (status.state === "ahead") return "当前部署领先";
+  if (status.state === "diverged") return "提交已分叉";
   return "无法判断";
 }
 
 function stateClass(status: DeploymentStatus | null, pending: boolean, error: string) {
   if (pending || error || !status || status.state === "unknown") return "";
   if (status.state === "current") return "published";
-  return "needs-update";
+  if (status.state === "behind") return "needs-update";
+  return "";
 }
 
 function sourceLabel(source: CommitInfo["source"]) {

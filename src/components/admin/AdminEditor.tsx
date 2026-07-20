@@ -19,8 +19,20 @@ import {
   type DraftRecoveryKind,
   type EditorDraftSnapshot
 } from "@/lib/admin/editor-draft";
-import type { PostRevision, PostStatus, PostType, PostWithTags } from "@/types/blog";
+import type {
+  PostRevision,
+  PostRevisionPage,
+  PostStatus,
+  PostType,
+  PostWithTags
+} from "@/types/blog";
 import { ConfirmDialog } from "@/components/admin/AdminFeedback";
+import {
+  clearPersistentOperationKey,
+  createIdempotencyKey,
+  persistentOperationKey,
+  requestJson
+} from "@/lib/http/client-api";
 
 type RevisionFilter = "all" | Extract<PostStatus, "published" | "draft">;
 type EditorViewMode = "write" | "split" | "preview";
@@ -37,6 +49,23 @@ type Draft = {
   tags: string;
   seoTitle: string;
   seoDescription: string;
+};
+
+type ConflictState = {
+  currentVersion: number | null;
+  currentUpdatedAt: string | null;
+  draftPreserved: boolean;
+};
+
+type WriteErrorResponse = {
+  ok: false;
+  code?: string;
+  error: string;
+  current?: {
+    id: number;
+    version: number;
+    updatedAt: string;
+  } | null;
 };
 
 const emptyRevisions: PostRevision[] = [];
@@ -75,14 +104,17 @@ function draftFromPost(post: PostWithTags | null): Draft {
 export function AdminEditor({
   post,
   revisions = emptyRevisions,
+  revisionPage,
   backHref = "/admin/posts",
   backLabel = "返回内容列表"
 }: {
   post: PostWithTags | null;
   revisions?: PostRevision[];
+  revisionPage?: PostRevisionPage;
   backHref?: string;
   backLabel?: string;
 }) {
+  const initialRevisions = revisionPage?.revisions ?? revisions;
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const pendingRef = useRef(false);
@@ -108,11 +140,29 @@ export function AdminEditor({
     confirmLabel: string;
     danger: boolean;
   } | null>(null);
-  const [revisionItems, setRevisionItems] = useState<PostRevision[]>(revisions);
+  const [revisionItems, setRevisionItems] = useState<PostRevision[]>(initialRevisions);
+  const [revisionTotal, setRevisionTotal] = useState(
+    revisionPage?.total ?? initialRevisions.length
+  );
+  const [revisionHasMore, setRevisionHasMore] = useState(
+    revisionPage?.hasMore ?? false
+  );
+  const [revisionNextCursor, setRevisionNextCursor] = useState<string | null>(
+    revisionPage?.nextCursor ?? null
+  );
+  const [revisionLoading, setRevisionLoading] = useState(false);
   const [revisionFilter, setRevisionFilter] = useState<RevisionFilter>("all");
   const [selectedRevisionId, setSelectedRevisionId] = useState<number | null>(
-    revisions[0]?.id ?? null
+    initialRevisions[0]?.id ?? null
   );
+  const [serverVersion, setServerVersion] = useState<number | null>(
+    post?.version ?? null
+  );
+  const [conflict, setConflict] = useState<ConflictState | null>(null);
+  const [uploadRetry, setUploadRetry] = useState<{
+    file: File;
+    idempotencyKey: string;
+  } | null>(null);
 
   const endpoint = useMemo(
     () => (draft.id ? `/api/admin/posts/${draft.id}` : "/api/admin/posts"),
@@ -192,14 +242,18 @@ export function AdminEditor({
   }, [draft, isDirty, post?.id, post?.updatedAt]);
 
   useEffect(() => {
-    setRevisionItems(revisions);
+    const nextRevisions = revisionPage?.revisions ?? revisions;
+    setRevisionItems(nextRevisions);
+    setRevisionTotal(revisionPage?.total ?? nextRevisions.length);
+    setRevisionHasMore(revisionPage?.hasMore ?? false);
+    setRevisionNextCursor(revisionPage?.nextCursor ?? null);
     setSelectedRevisionId((current) => {
-      if (current && revisions.some((revision) => revision.id === current)) {
+      if (current && nextRevisions.some((revision) => revision.id === current)) {
         return current;
       }
-      return revisions[0]?.id ?? null;
+      return nextRevisions[0]?.id ?? null;
     });
-  }, [revisions]);
+  }, [revisionPage, revisions]);
 
   useEffect(() => {
     if (!isDirty) return;
@@ -327,32 +381,115 @@ export function AdminEditor({
     }
   }
 
+  function preserveDraftForConflict(current?: WriteErrorResponse["current"]) {
+    const draftPreserved = writeEditorDraft(
+      window.localStorage,
+      editorDraftStorageKey(draft.id ?? post?.id),
+      createEditorDraftSnapshot({
+        draft,
+        postId: draft.id ?? post?.id ?? null,
+        sourceUpdatedAt: post?.updatedAt ?? null
+      })
+    );
+    setConflict({
+      currentVersion: current?.version ?? null,
+      currentUpdatedAt: current?.updatedAt ?? null,
+      draftPreserved
+    });
+    setMessage(
+      draftPreserved
+        ? "保存冲突：服务器内容已更新。你的当前草稿已保存在本浏览器，尚未覆盖服务器版本。"
+        : "保存冲突：服务器内容已更新，且浏览器无法保存本地副本。请先复制当前内容再重新载入。"
+    );
+    return draftPreserved;
+  }
+
+  function reloadLatestAfterConflict() {
+    const preserved = preserveDraftForConflict(
+      conflict?.currentVersion
+        ? {
+            id: draft.id ?? post?.id ?? 0,
+            version: conflict.currentVersion,
+            updatedAt: conflict.currentUpdatedAt ?? ""
+          }
+        : null
+    );
+    if (!preserved) return;
+    window.location.reload();
+  }
+
   async function save(status: PostStatus, successMessage?: string) {
     setMessage("");
+    setConflict(null);
     const wasNew = !draft.id;
     const targetEndpoint = endpoint;
-    const payload = { ...draft, status };
+    const payload = {
+      ...draft,
+      status,
+      ...(draft.id ? { expectedVersion: serverVersion } : {})
+    };
+    const body = JSON.stringify(payload);
+    const createOperationStorageKey = "manjyun:admin-editor:create-operation";
+    const idempotencyKey = wasNew
+      ? persistentOperationKey(
+          window.localStorage,
+          createOperationStorageKey,
+          body
+        )
+      : null;
 
     await runPending("保存失败", async () => {
-      const response = await fetch(targetEndpoint, {
-        method: payload.id ? "PUT" : "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      });
-      const data = (await response.json().catch(() => null)) as
-        | { ok: true; id: number; slug: string }
-        | { ok: false; error: string }
-        | null;
-      if (!response.ok || !data?.ok) {
-        setMessage(data && !data.ok ? data.error : "保存失败");
+      const result = await requestJson<{
+        ok: true;
+        id: number;
+        slug: string;
+        version: number;
+        updatedAt: string;
+        replayed?: boolean;
+      }>(
+        targetEndpoint,
+        {
+          method: payload.id ? "PUT" : "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(idempotencyKey
+              ? { "Idempotency-Key": idempotencyKey }
+              : {})
+          },
+          body
+        },
+        { fallbackMessage: "保存失败" }
+      );
+      if (!result.ok) {
+        const errorData = result.data as WriteErrorResponse | null;
+        if (
+          result.status === 409 &&
+          result.code === "VERSION_CONFLICT"
+        ) {
+          preserveDraftForConflict(errorData?.current);
+          return;
+        }
+        setMessage(result.message);
         return;
       }
+      const data = result.data;
       setDraft((current) => ({ ...current, id: data.id, slug: data.slug || current.slug, status }));
+      setServerVersion(data.version);
       dirtyRef.current = false;
       setIsDirty(false);
       clearEditorDraft(window.localStorage, editorDraftStorageKey(draft.id ?? post?.id));
       if (wasNew) clearEditorDraft(window.localStorage, editorDraftStorageKey(null));
-      setMessage(successMessage ?? (status === "published" ? "已发布" : "已保存草稿"));
+      if (wasNew) {
+        clearPersistentOperationKey(
+          window.localStorage,
+          createOperationStorageKey
+        );
+      }
+      setMessage(
+        data.replayed
+          ? "已确认此前的新建请求成功，未创建重复内容"
+          : successMessage ?? (status === "published" ? "已发布" : "已保存草稿")
+      );
       if (wasNew) {
         window.location.assign(`/admin/posts/${data.id}`);
       } else {
@@ -371,9 +508,21 @@ export function AdminEditor({
     });
     if (!confirmed) return;
     await runPending("删除失败", async () => {
-      const response = await fetch(`${endpoint}?permanent=1`, { method: "DELETE" });
-      if (!response.ok) {
-        setMessage("删除失败");
+      const result = await requestJson<{ ok: true }>(
+        `${endpoint}?permanent=1&expectedVersion=${serverVersion ?? ""}`,
+        { method: "DELETE" },
+        { fallbackMessage: "删除失败" }
+      );
+      if (!result.ok) {
+        const data = result.data as WriteErrorResponse | null;
+        if (
+          result.status === 409 &&
+          result.code === "VERSION_CONFLICT"
+        ) {
+          preserveDraftForConflict(data?.current);
+          return;
+        }
+        setMessage(result.message);
         return;
       }
       dirtyRef.current = false;
@@ -398,22 +547,38 @@ export function AdminEditor({
     }
 
     setMessage("");
+    setConflict(null);
     await runPending("操作失败", async () => {
-      const response = await fetch(endpoint, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action })
-      });
-      const data = (await response.json().catch(() => null)) as
-        | { ok: true; status: PostStatus }
-        | { ok: false; error: string }
-        | null;
-      if (!response.ok || !data?.ok) {
-        setMessage(data && !data.ok ? data.error : "操作失败");
+      const result = await requestJson<{
+        ok: true;
+        status: PostStatus;
+        version: number;
+        updatedAt: string;
+      }>(
+        endpoint,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action, expectedVersion: serverVersion })
+        },
+        { fallbackMessage: "操作失败" }
+      );
+      if (!result.ok) {
+        const data = result.data as WriteErrorResponse | null;
+        if (
+          result.status === 409 &&
+          result.code === "VERSION_CONFLICT"
+        ) {
+          preserveDraftForConflict(data?.current);
+          return;
+        }
+        setMessage(result.message);
         return;
       }
 
+      const data = result.data;
       setDraft((current) => ({ ...current, status: data.status }));
+      setServerVersion(data.version);
       dirtyRef.current = false;
       setIsDirty(false);
       setMessage(action === "trash" ? "已移到回收站" : "已恢复为草稿");
@@ -438,60 +603,127 @@ export function AdminEditor({
     if (!confirmed) return;
 
     setMessage("");
+    setConflict(null);
     await runPending("回退失败", async () => {
-      const response = await fetch(`${endpoint}/revisions`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ revisionId })
-      });
-      const data = (await response.json().catch(() => null)) as
-        | {
-            ok: true;
-            post: PostWithTags;
-            revisions: PostRevision[];
-          }
-        | { ok: false; error: string }
-        | null;
-      if (!response.ok || !data?.ok) {
-        setMessage(data && !data.ok ? data.error : "回退失败");
+      const result = await requestJson<{
+        ok: true;
+        post: PostWithTags;
+      } & PostRevisionPage>(
+        `${endpoint}/revisions`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ revisionId, expectedVersion: serverVersion })
+        },
+        { fallbackMessage: "回退失败" }
+      );
+      if (!result.ok) {
+        const data = result.data as WriteErrorResponse | null;
+        if (
+          result.status === 409 &&
+          result.code === "VERSION_CONFLICT"
+        ) {
+          preserveDraftForConflict(data?.current);
+          return;
+        }
+        setMessage(result.message);
         return;
       }
 
+      const data = result.data;
       setDraft(draftFromPost(data.post));
+      setServerVersion(data.post.version);
       dirtyRef.current = false;
       setIsDirty(false);
       setRevisionItems(data.revisions);
+      setRevisionTotal(data.total);
+      setRevisionHasMore(data.hasMore);
+      setRevisionNextCursor(data.nextCursor);
       setSelectedRevisionId(data.revisions[0]?.id ?? null);
       setMessage(`已回退为${statusText(data.post.status, false)}`);
       router.refresh();
     });
   }
 
-  async function upload(file: File) {
-    const formData = new FormData();
-    formData.append("file", file);
-    const response = await fetch("/api/admin/media", {
-      method: "POST",
-      body: formData
-    });
-    const data = (await response.json()) as
-      | { ok: true; media: { url: string; mime: string; originalName: string } }
-      | { ok: false; error: string };
-    if (!response.ok || !data.ok) {
-      setMessage(data.ok ? "上传失败" : data.error);
-      return;
-    }
-    const url = data.media.url;
-    if (data.media.mime.startsWith("image/")) {
-      update("cover", draft.cover || url);
-      update("markdown", `${draft.markdown}\n\n![${data.media.originalName}](${url})\n`);
-    } else if (data.media.mime.startsWith("audio/")) {
-      update(
-        "markdown",
-        `${draft.markdown}\n\n[audio:${data.media.originalName}](${url})\n`
+  async function upload(file: File, idempotencyKey = createIdempotencyKey()) {
+    setMessage("");
+    await runPending("上传失败", async () => {
+      const formData = new FormData();
+      formData.append("file", file);
+      const result = await requestJson<{
+        ok: true;
+        media: { url: string; mime: string; originalName: string };
+        replayed: boolean;
+      }>(
+        "/api/admin/media",
+        {
+          method: "POST",
+          headers: { "Idempotency-Key": idempotencyKey },
+          body: formData
+        },
+        { fallbackMessage: "上传失败" }
       );
-    } else {
-      update("markdown", `${draft.markdown}\n\n[${data.media.originalName}](${url})\n`);
+      if (!result.ok) {
+        setMessage(result.message);
+        if (
+          result.outcome === "unknown" ||
+          result.code === "IDEMPOTENCY_IN_PROGRESS"
+        ) {
+          setUploadRetry({ file, idempotencyKey });
+        } else {
+          setUploadRetry(null);
+        }
+        return;
+      }
+
+      setUploadRetry(null);
+      const data = result.data;
+      const url = data.media.url;
+      if (data.media.mime.startsWith("image/")) {
+        update("cover", draft.cover || url);
+        update("markdown", `${draft.markdown}\n\n![${data.media.originalName}](${url})\n`);
+      } else if (data.media.mime.startsWith("audio/")) {
+        update(
+          "markdown",
+          `${draft.markdown}\n\n[audio:${data.media.originalName}](${url})\n`
+        );
+      } else {
+        update("markdown", `${draft.markdown}\n\n[${data.media.originalName}](${url})\n`);
+      }
+      if (data.replayed) {
+        setMessage("已确认此前上传成功，未创建重复媒体。");
+      }
+    });
+  }
+
+  async function loadMoreRevisions() {
+    if (!draft.id || !revisionNextCursor || revisionLoading) return;
+    setRevisionLoading(true);
+    try {
+      const params = new URLSearchParams({ cursor: revisionNextCursor });
+      const result = await requestJson<{ ok: true } & PostRevisionPage>(
+        `${endpoint}/revisions?${params.toString()}`,
+        { method: "GET" },
+        { fallbackMessage: "加载版本历史失败", operation: "read" }
+      );
+      if (!result.ok) {
+        setMessage(result.message);
+        return;
+      }
+
+      const data = result.data;
+      setRevisionItems((current) => {
+        const existingIds = new Set(current.map((revision) => revision.id));
+        return [
+          ...current,
+          ...data.revisions.filter((revision) => !existingIds.has(revision.id))
+        ];
+      });
+      setRevisionTotal(data.total);
+      setRevisionHasMore(data.hasMore);
+      setRevisionNextCursor(data.nextCursor);
+    } finally {
+      setRevisionLoading(false);
     }
   }
 
@@ -516,6 +748,25 @@ export function AdminEditor({
             <div className="btn-row">
               <button className="btn primary" type="button" onClick={recoverLocalDraft}>恢复草稿</button>
               <button className="btn ghost" type="button" onClick={discardLocalDraft}>放弃本地副本</button>
+            </div>
+          </section>
+        ) : null}
+        {conflict ? (
+          <section className="admin-notice error" role="alert">
+            <strong>服务器版本比当前页面更新</strong>
+            <span>
+              {conflict.draftPreserved
+                ? "当前草稿已保存在浏览器。重新载入后可先查看服务器版本，再用“恢复草稿”取回本地修改并重新保存。"
+                : "浏览器暂时无法保存本地副本。请先复制当前内容；重新载入按钮会在本地保存成功后才继续。"}
+            </span>
+            <div className="btn-row">
+              <button
+                className="btn primary"
+                type="button"
+                onClick={reloadLatestAfterConflict}
+              >
+                重新载入服务器版本
+              </button>
             </div>
           </section>
         ) : null}
@@ -603,7 +854,13 @@ export function AdminEditor({
                 ) : null}
               </>
             )}
-            <button className="btn ghost" type="button" onClick={() => setHelpOpen((open) => !open)}>
+            <button
+              className="btn ghost"
+              type="button"
+              aria-expanded={helpOpen}
+              aria-controls="editor-writing-help"
+              onClick={() => setHelpOpen((open) => !open)}
+            >
               写作帮助
             </button>
           </div>
@@ -632,10 +889,11 @@ export function AdminEditor({
         <div className="editor-workspace">
         <div className="editor-panel editor-write-panel">
           <div className="editor-panel-head">
-            <span>Markdown</span>
+            <label htmlFor="editor-markdown">Markdown</label>
             <span>{draft.markdown.length} chars</span>
           </div>
           <textarea
+            id="editor-markdown"
             className="markdown-editor input"
             value={draft.markdown}
             onChange={(event) => update("markdown", event.target.value)}
@@ -674,7 +932,9 @@ export function AdminEditor({
                 aria-controls="revision-history-content"
                 onClick={() => setRevisionOpen((open) => !open)}
               >
-                <span className="chip">{revisionItems.length}</span>
+                <span className="chip">
+                  {revisionItems.length} / {revisionTotal}
+                </span>
                 <span>{revisionOpen ? "收起" : "展开"}</span>
                 <svg viewBox="0 0 16 16" aria-hidden="true">
                   <path d="m4 6 4 4 4-4" />
@@ -685,6 +945,7 @@ export function AdminEditor({
               id="revision-history-content"
               className="revision-collapse"
               aria-hidden={!revisionOpen}
+              inert={!revisionOpen || undefined}
             >
               <div className="revision-collapse-inner">
                 {revisionItems.length ? (
@@ -705,7 +966,7 @@ export function AdminEditor({
                       ))}
                     </div>
                     <div className="revision-list">
-                      {visibleRevisions.map((revision, index) => (
+                      {visibleRevisions.map((revision) => (
                         <button
                           key={revision.id}
                           className={`revision-item ${selectedRevisionId === revision.id ? "is-active" : ""}`}
@@ -714,7 +975,7 @@ export function AdminEditor({
                           onClick={() => setSelectedRevisionId(revision.id)}
                         >
                           <span>
-                            <strong>{revisionVersionLabel(revision, index, visibleRevisions.length)}</strong>
+                            <strong>{revisionVersionLabel(revision)}</strong>
                             <small>{formatRevisionTime(revision.createdAt)}</small>
                           </span>
                           <span className={`status-pill ${revision.status}`}>
@@ -723,6 +984,27 @@ export function AdminEditor({
                         </button>
                       ))}
                     </div>
+                    {revisionHasMore ? (
+                      <button
+                        className="btn ghost"
+                        type="button"
+                        disabled={revisionLoading}
+                        aria-busy={revisionLoading}
+                        onClick={() => void loadMoreRevisions()}
+                      >
+                        {revisionLoading
+                          ? "正在加载更早版本…"
+                          : `加载更早版本（已载入 ${revisionItems.length} / ${revisionTotal}）`}
+                      </button>
+                    ) : revisionTotal > revisionItems.length ? (
+                      <p className="field-hint" role="status">
+                        服务器版本总量已变化；刷新页面可载入其他标签页刚生成的版本。
+                      </p>
+                    ) : revisionTotal > 0 ? (
+                      <p className="field-hint" role="status">
+                        已载入全部 {revisionTotal} 条版本记录。
+                      </p>
+                    ) : null}
                     {selectedRevision ? (
                       <div className="revision-preview">
                         <div className="revision-preview-head">
@@ -756,14 +1038,14 @@ export function AdminEditor({
 
         <section className="settings-card form-grid">
           <div className="field">
-            <label>Slug</label>
-            <input className="input" value={draft.slug} disabled={draft.status === "trashed"} onChange={(event) => update("slug", event.target.value)} placeholder={`留空自动生成 ${getContentTypeDefinition(draft.type).slugPrefix}-001`} />
+            <label htmlFor="editor-slug">Slug</label>
+            <input id="editor-slug" className="input" value={draft.slug} disabled={draft.status === "trashed"} onChange={(event) => update("slug", event.target.value)} placeholder={`留空自动生成 ${getContentTypeDefinition(draft.type).slugPrefix}-001`} />
           </div>
           <div className="field">
-            <label>类型</label>
-            <select className="select" value={draft.type} disabled={draft.status === "trashed" || draft.type === "page"} onChange={(event) => update("type", event.target.value as PostType)}>
+            <label htmlFor="editor-type">类型</label>
+            <select id="editor-type" className="select" value={draft.type} disabled={draft.status === "trashed" || draft.type === "page"} onChange={(event) => update("type", event.target.value as PostType)}>
               {draft.type === "page" ? (
-                <option value="page">页面（系统）</option>
+                <option value="page">独立页面</option>
               ) : (
                 <>
                   <option value="post">随笔</option>
@@ -773,8 +1055,8 @@ export function AdminEditor({
             </select>
             <p className="field-hint">
               {draft.type === "page"
-                ? "这是兼容旧数据的隐藏系统类型；可以编辑内容，但不能改成其他类型。"
-                : "系统页面不在常规内容列表与新建选项中显示。"}
+                ? "独立页面在“页面”工作台管理；为保持公开路由稳定，类型不可转换。"
+                : "独立页面请从“页面”工作台新建和管理。"}
             </p>
           </div>
           <div className="field tag-picker-field">
@@ -811,34 +1093,47 @@ export function AdminEditor({
             </p>
           </div>
           <div className="field">
-            <label>摘要</label>
-            <textarea className="textarea" value={draft.excerpt} disabled={draft.status === "trashed"} onChange={(event) => update("excerpt", event.target.value)} />
+            <label htmlFor="editor-excerpt">摘要</label>
+            <textarea id="editor-excerpt" className="textarea" value={draft.excerpt} disabled={draft.status === "trashed"} onChange={(event) => update("excerpt", event.target.value)} />
           </div>
           <div className="field">
-            <label>封面 URL</label>
-            <input className="input" value={draft.cover} disabled={draft.status === "trashed"} onChange={(event) => update("cover", event.target.value)} />
+            <label htmlFor="editor-cover">封面 URL</label>
+            <input id="editor-cover" className="input" value={draft.cover} disabled={draft.status === "trashed"} onChange={(event) => update("cover", event.target.value)} />
           </div>
         </section>
 
         <section className="settings-card form-grid">
           <div className="field">
-            <label>上传图片/音频/文件</label>
+            <label htmlFor="editor-media-upload">上传图片/音频/文件</label>
             <input
+              id="editor-media-upload"
               ref={fileInputRef}
               className="visually-hidden"
               type="file"
               accept="image/jpeg,image/png,image/gif,image/webp,image/avif,image/x-icon,audio/mpeg,audio/wav,audio/ogg,audio/flac,audio/mp4,application/pdf"
-              disabled={draft.status === "trashed"}
+              disabled={draft.status === "trashed" || pending}
               onChange={(event) => {
                 const file = event.target.files?.[0];
                 if (file) void upload(file);
                 event.currentTarget.value = "";
               }}
             />
-            <button className="upload-control" type="button" disabled={draft.status === "trashed"} onClick={() => fileInputRef.current?.click()}>
+            <button className="upload-control" type="button" disabled={draft.status === "trashed" || pending} onClick={() => fileInputRef.current?.click()}>
               <span>选择媒体文件</span>
               <small>图片插入 Markdown，音频插入 audio 卡片；支持 PDF</small>
             </button>
+            {uploadRetry ? (
+              <button
+                className="btn"
+                type="button"
+                disabled={pending}
+                onClick={() =>
+                  void upload(uploadRetry.file, uploadRetry.idempotencyKey)
+                }
+              >
+                用同一幂等键重试上传
+              </button>
+            ) : null}
           </div>
           <p className="admin-subtitle">
             图片会插入 Markdown；音频会插入 <code>[audio:title](url)</code> 卡片语法。
@@ -847,12 +1142,12 @@ export function AdminEditor({
 
         <section className="settings-card form-grid">
           <div className="field">
-            <label>SEO 标题</label>
-            <input className="input" value={draft.seoTitle} disabled={draft.status === "trashed"} onChange={(event) => update("seoTitle", event.target.value)} />
+            <label htmlFor="editor-seo-title">SEO 标题</label>
+            <input id="editor-seo-title" className="input" value={draft.seoTitle} disabled={draft.status === "trashed"} onChange={(event) => update("seoTitle", event.target.value)} />
           </div>
           <div className="field">
-            <label>SEO 描述</label>
-            <textarea className="textarea" value={draft.seoDescription} disabled={draft.status === "trashed"} onChange={(event) => update("seoDescription", event.target.value)} />
+            <label htmlFor="editor-seo-description">SEO 描述</label>
+            <textarea id="editor-seo-description" className="textarea" value={draft.seoDescription} disabled={draft.status === "trashed"} onChange={(event) => update("seoDescription", event.target.value)} />
           </div>
         </section>
       </aside>
@@ -898,9 +1193,8 @@ function revisionReasonText(reason: string) {
   return labels[reason] ?? "保存前版本";
 }
 
-function revisionVersionLabel(revision: PostRevision, index: number, total: number) {
-  const versionNumber = Math.max(1, total - index);
-  return `${statusText(revision.status, false)}版本 ${versionNumber} · ${revisionReasonText(revision.reason)}`;
+function revisionVersionLabel(revision: PostRevision) {
+  return `${statusText(revision.status, false)}版本 #${revision.id} · ${revisionReasonText(revision.reason)}`;
 }
 
 function formatRevisionTime(input: string) {
@@ -909,7 +1203,7 @@ function formatRevisionTime(input: string) {
 
 function WritingHelp() {
   return (
-    <section className="editor-help settings-card">
+    <section id="editor-writing-help" className="editor-help settings-card">
       <div className="settings-section-head">
         <div>
           <h2>Markdown 写作速查</h2>

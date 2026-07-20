@@ -6,6 +6,8 @@ import { useEffect, useMemo, useState } from "react";
 import { formatDate } from "@/lib/content/format";
 import {
   adminContentListHref,
+  adminPublicContentHref,
+  adminPublicTagHref,
   type AdminContentStatusFilter,
   type AdminContentTypeFilter
 } from "@/lib/admin/content-list";
@@ -16,6 +18,7 @@ import {
 } from "@/lib/content/content-types";
 import type { PostStatus, PostSummary } from "@/types/blog";
 import { AdminNotice, ConfirmDialog } from "@/components/admin/AdminFeedback";
+import { requestJson } from "@/lib/http/client-api";
 
 type BulkAction = "publish" | "unpublish" | "trash" | "restore" | "delete";
 
@@ -127,19 +130,26 @@ export function AdminContentTable({
     setSelectedIds(checked ? new Set(visibleIds) : new Set());
   }
 
-  async function executeAction(id: number, action: "publish" | "unpublish" | "trash" | "restore") {
+  async function executeAction(
+    id: number,
+    expectedVersion: number,
+    action: "publish" | "unpublish" | "trash" | "restore"
+  ) {
     setMessage("");
     setPendingId(id);
     try {
-      const response = await fetch(`/api/admin/posts/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action })
-      });
-      if (!response.ok) {
-        const data = (await response.json().catch(() => null)) as { error?: string } | null;
+      const result = await requestJson<{ ok: true }>(
+        `/api/admin/posts/${id}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action, expectedVersion })
+        },
+        { fallbackMessage: "操作失败" }
+      );
+      if (!result.ok) {
         setMessageKind("error");
-        setMessage(data?.error ?? "操作失败");
+        setMessage(result.message);
         return;
       }
       setMessageKind("success");
@@ -150,31 +160,37 @@ export function AdminContentTable({
     }
   }
 
-  function runAction(id: number, title: string, action: "publish" | "unpublish" | "trash" | "restore") {
+  function runAction(
+    id: number,
+    expectedVersion: number,
+    title: string,
+    action: "publish" | "unpublish" | "trash" | "restore"
+  ) {
     if (action === "trash" || action === "unpublish") {
       setConfirmation({
         title: action === "trash" ? `把“${title}”移到回收站？` : `取消发布“${title}”？`,
         description: action === "trash" ? "公开页面会立即隐藏，之后仍可从回收站恢复。" : "公开页面会立即隐藏，内容将回到草稿状态。",
         confirmLabel: action === "trash" ? "移到回收站" : "取消发布",
         danger: action === "trash",
-        run: () => executeAction(id, action)
+        run: () => executeAction(id, expectedVersion, action)
       });
       return;
     }
-    void executeAction(id, action);
+    void executeAction(id, expectedVersion, action);
   }
 
-  async function executePermanentDelete(id: number) {
+  async function executePermanentDelete(id: number, expectedVersion: number) {
     setMessage("");
     setPendingId(id);
     try {
-      const response = await fetch(`/api/admin/posts/${id}?permanent=1`, {
-        method: "DELETE"
-      });
-      if (!response.ok) {
-        const data = (await response.json().catch(() => null)) as { error?: string } | null;
+      const result = await requestJson<{ ok: true }>(
+        `/api/admin/posts/${id}?permanent=1&expectedVersion=${expectedVersion}`,
+        { method: "DELETE" },
+        { fallbackMessage: "删除失败" }
+      );
+      if (!result.ok) {
         setMessageKind("error");
-        setMessage(data?.error ?? "删除失败");
+        setMessage(result.message);
         return;
       }
       setMessageKind("success");
@@ -185,13 +201,13 @@ export function AdminContentTable({
     }
   }
 
-  function deletePermanently(id: number, title: string) {
+  function deletePermanently(id: number, expectedVersion: number, title: string) {
     setConfirmation({
       title: `永久删除“${title}”？`,
       description: "正文、标签关系和版本历史都会被永久删除，这个操作不能撤销。",
       confirmLabel: "永久删除",
       danger: true,
-      run: () => executePermanentDelete(id)
+      run: () => executePermanentDelete(id, expectedVersion)
     });
   }
 
@@ -215,15 +231,26 @@ export function AdminContentTable({
     setMessage("");
     setBulkPending(true);
     try {
-      const response = await fetch("/api/admin/posts", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ids, action })
-      });
-      if (!response.ok) {
-        const data = (await response.json().catch(() => null)) as { error?: string } | null;
+      const result = await requestJson<{ ok: true; count: number }>(
+        "/api/admin/posts",
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ids,
+            action,
+            versions: Object.fromEntries(
+              posts
+                .filter((post) => ids.includes(post.id))
+                .map((post) => [post.id, post.version])
+            )
+          })
+        },
+        { fallbackMessage: "批量操作失败" }
+      );
+      if (!result.ok) {
         setMessageKind("error");
-        setMessage(data?.error ?? "批量操作失败");
+        setMessage(result.message);
         return;
       }
       setSelectedIds(new Set());
@@ -364,11 +391,16 @@ export function AdminContentTable({
                 <td data-label="标签">
                   {post.tags?.length ? (
                     <div className="content-tags">
-                      {post.tags.map((tag) => (
-                        <Link key={tag.id} href={`/tag/${tag.slug}`} target="_blank" rel="noreferrer">
-                          {tag.name}
-                        </Link>
-                      ))}
+                      {post.tags.map((tag) => {
+                        const href = adminPublicTagHref(post.status, tag.slug);
+                        return href ? (
+                          <Link key={tag.id} href={href} target="_blank" rel="noreferrer">
+                            {tag.name}
+                          </Link>
+                        ) : (
+                          <span key={tag.id}>{tag.name}</span>
+                        );
+                      })}
                     </div>
                   ) : (
                     <span className="muted-cell">-</span>
@@ -376,9 +408,18 @@ export function AdminContentTable({
                 </td>
                 <td data-label="更新">{formatDate(post.updatedAt)}</td>
                 <td data-label="路径">
-                  <Link className="path-code" href={contentHref(post.type, post.slug)} target="_blank" rel="noreferrer">
-                    {contentHref(post.type, post.slug)}
-                  </Link>
+                  {adminPublicContentHref(post) ? (
+                    <Link
+                      className="path-code"
+                      href={adminPublicContentHref(post)!}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      {contentHref(post.type, post.slug)}
+                    </Link>
+                  ) : (
+                    <span className="path-code">{contentHref(post.type, post.slug)}</span>
+                  )}
                 </td>
                 <td data-label="操作">
                   <div className="row-actions">
@@ -396,7 +437,7 @@ export function AdminContentTable({
                           className="row-action primary-action"
                           type="button"
                           disabled={pendingId === post.id}
-                          onClick={() => runAction(post.id, post.title, "unpublish")}
+                          onClick={() => runAction(post.id, post.version, post.title, "unpublish")}
                         >
                           取消发布
                         </button>
@@ -404,7 +445,7 @@ export function AdminContentTable({
                           className="row-action danger-action"
                           type="button"
                           disabled={pendingId === post.id}
-                          onClick={() => runAction(post.id, post.title, "trash")}
+                          onClick={() => runAction(post.id, post.version, post.title, "trash")}
                         >
                           移到回收站
                         </button>
@@ -416,7 +457,7 @@ export function AdminContentTable({
                           className="row-action primary-action"
                           type="button"
                           disabled={pendingId === post.id}
-                          onClick={() => runAction(post.id, post.title, "publish")}
+                          onClick={() => runAction(post.id, post.version, post.title, "publish")}
                         >
                           发布
                         </button>
@@ -424,7 +465,7 @@ export function AdminContentTable({
                           className="row-action danger-action"
                           type="button"
                           disabled={pendingId === post.id}
-                          onClick={() => runAction(post.id, post.title, "trash")}
+                          onClick={() => runAction(post.id, post.version, post.title, "trash")}
                         >
                           移到回收站
                         </button>
@@ -436,7 +477,7 @@ export function AdminContentTable({
                           className="row-action primary-action"
                           type="button"
                           disabled={pendingId === post.id}
-                          onClick={() => runAction(post.id, post.title, "restore")}
+                          onClick={() => runAction(post.id, post.version, post.title, "restore")}
                         >
                           恢复
                         </button>
@@ -444,7 +485,7 @@ export function AdminContentTable({
                           className="row-action danger-action"
                           type="button"
                           disabled={pendingId === post.id}
-                          onClick={() => deletePermanently(post.id, post.title)}
+                          onClick={() => deletePermanently(post.id, post.version, post.title)}
                         >
                           永久删除
                         </button>

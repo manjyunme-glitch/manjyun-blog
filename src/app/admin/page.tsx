@@ -20,7 +20,6 @@ export default async function AdminDashboardPage() {
       title="概览"
       subtitle="站点健康、快捷动作和最近活动。完整管理功能放在“内容”。"
       breadcrumbs={[{ label: "概览" }]}
-      activeNav="/admin"
       action={<Link className="btn primary" href="/admin/posts/new">写新草稿</Link>}
     >
       <div className="dashboard-grid">

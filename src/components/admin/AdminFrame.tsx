@@ -11,14 +11,12 @@ export function AdminFrame({
   title,
   subtitle,
   breadcrumbs = [],
-  activeNav,
   action,
   children
 }: {
   title: string;
   subtitle?: string;
   breadcrumbs?: Breadcrumb[];
-  activeNav?: string;
   action?: React.ReactNode;
   children: React.ReactNode;
 }) {

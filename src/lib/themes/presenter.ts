@@ -2,6 +2,7 @@ import {
   contentHref,
   getContentTypeDefinition
 } from "@/lib/content/content-types";
+import { publicCollectionPageHref } from "@/lib/content/public-pagination";
 import { formatDate, hostFromUrl, uptimeFrom } from "@/lib/content/format";
 import { renderEntryMarkdown, renderMarkdown } from "@/lib/content/markdown";
 import { readingTime } from "@/lib/content/reading-time";
@@ -11,6 +12,7 @@ import type {
   NavLink,
   PostRecord,
   PostWithTags,
+  PublicPostSummary,
   SiteSettings
 } from "@/types/blog";
 import type {
@@ -109,7 +111,7 @@ export function tagHref(slug: string) {
 }
 
 export function presentEntrySummary(
-  post: PostRecord
+  post: PostRecord | PublicPostSummary
 ): ThemeEntrySummaryViewModel {
   const type = getContentTypeDefinition(post.type);
   const publishedAt = post.publishedAt ?? post.createdAt;
@@ -151,8 +153,8 @@ function presentHomeModule(
   input: {
     settings: SiteSettings;
     frequentLinks: NavLink[];
-    posts: PostRecord[];
-    projects: PostRecord[];
+    posts: Array<PostRecord | PublicPostSummary>;
+    projects: Array<PostRecord | PublicPostSummary>;
   }
 ): ThemeHomeModuleViewModel | null {
   const config = module.config ?? {};
@@ -219,8 +221,8 @@ export function presentHome(input: {
   navLinks: NavLink[];
   frequentLinks: NavLink[];
   modules: HomeModule[];
-  posts: PostRecord[];
-  projects: PostRecord[];
+  posts: Array<PostRecord | PublicPostSummary>;
+  projects: Array<PostRecord | PublicPostSummary>;
 }): ThemeHomeViewModel {
   const modules = [...input.modules]
     .filter((module) => module.enabled)
@@ -247,7 +249,12 @@ export function presentCollection(input: {
   description: string;
   href: string;
   pathLabel?: string;
-  posts: PostRecord[];
+  posts: Array<PostRecord | PublicPostSummary>;
+  pagination?: {
+    page: number;
+    totalPages: number;
+    total: number;
+  };
   backLink?: { href: string; label: string };
 }): ThemeCollectionViewModel {
   const entries = input.posts.map(presentEntrySummary);
@@ -258,13 +265,37 @@ export function presentCollection(input: {
     description: input.description,
     href: input.href,
     pathLabel: input.pathLabel ?? input.href,
-    countLabel: `${entries.length} ${entries.length === 1 ? "entry" : "entries"}`,
+    countLabel: `${input.pagination?.total ?? entries.length} ${
+      (input.pagination?.total ?? entries.length) === 1 ? "entry" : "entries"
+    }`,
     sortLabel: "sorted by published date",
     entries,
     emptyMessage: "这里还没有内容。",
     backLink: input.backLink
       ? toLink(input.backLink.label, input.backLink.href)
-      : null
+      : null,
+    pagination:
+      input.pagination && input.pagination.totalPages > 1
+        ? {
+            label: `第 ${input.pagination.page} / ${input.pagination.totalPages} 页`,
+            currentPage: input.pagination.page,
+            totalPages: input.pagination.totalPages,
+            previous:
+              input.pagination.page > 1
+                ? toLink(
+                    "上一页",
+                    publicCollectionPageHref(input.href, input.pagination.page - 1)
+                  )
+                : null,
+            next:
+              input.pagination.page < input.pagination.totalPages
+                ? toLink(
+                    "下一页",
+                    publicCollectionPageHref(input.href, input.pagination.page + 1)
+                  )
+                : null
+          }
+        : null
   };
 }
 

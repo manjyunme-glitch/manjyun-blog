@@ -1,5 +1,6 @@
-import { all, get, run, transaction } from "@/lib/db/client";
+import { all, get, readTransaction, run, transaction } from "@/lib/db/client";
 import { slugify, splitCommaList } from "@/lib/content/slug";
+import { PUBLIC_COLLECTION_PAGE_SIZE } from "@/lib/content/public-pagination";
 import {
   getContentTypeDefinition,
   type AdminContentType
@@ -10,10 +11,16 @@ import type {
   NavLink,
   PostRecord,
   PostRevision,
+  PostRevisionPage,
   PostSummary,
   PostStatus,
   PostType,
   PostWithTags,
+  PublicFeedItem,
+  PublicPostSummary,
+  PublicPostSummaryPage,
+  PublicSitemapEntry,
+  SiteConfiguration,
   SiteSettings,
   ThemeInstallRecord,
   TagRecord
@@ -26,9 +33,17 @@ type StoredPostRevision = Omit<PostRevision, "tags"> & {
   tagsJson: string | null;
 };
 type StoredPostSummary = Omit<PostSummary, "tags">;
+type StoredPublicPostSummary = Omit<PublicPostSummary, "tags">;
+export type AdminIdentity = {
+  id: number;
+  username: string;
+  sessionVersion: number;
+};
+export type AdminUser = AdminIdentity & { passwordHash: string };
 
 export type SavePostInput = {
   id?: number;
+  expectedVersion?: number;
   type: PostType;
   title: string;
   slug?: string;
@@ -41,6 +56,48 @@ export type SavePostInput = {
   seoDescription?: string;
   tags?: string[];
 };
+
+export class VersionConflictError extends Error {
+  readonly code = "VERSION_CONFLICT";
+
+  constructor(
+    readonly resource: "post" | "site-configuration",
+    readonly currentVersion: number,
+    readonly resourceId?: number
+  ) {
+    super(
+      resource === "post"
+        ? "This post was updated in another tab."
+        : "Site settings were updated in another tab."
+    );
+    this.name = "VersionConflictError";
+  }
+}
+
+export type MediaReference = {
+  kind: "post" | "revision" | "navigation" | "setting" | "home-module";
+  id: string;
+  label: string;
+  field: string;
+};
+
+export class MediaInUseError extends Error {
+  readonly code = "MEDIA_IN_USE";
+
+  constructor(readonly references: MediaReference[]) {
+    super("This media file is still referenced.");
+    this.name = "MediaInUseError";
+  }
+}
+
+const homeModuleIds = [
+  "recentPosts",
+  "now",
+  "projects",
+  "frequentLinks",
+  "stack"
+] as const;
+const homeModuleIdSet = new Set<string>(homeModuleIds);
 
 const settingDefaults: SiteSettings = {
   siteTitle: "ManJyun",
@@ -59,7 +116,7 @@ const settingDefaults: SiteSettings = {
   projectsDescription: "记录已经完成、正在折腾、或者值得复盘的项目。",
   aboutTitle: "About",
   aboutMarkdown:
-    "这里是关于页面。可以在后台设置里写 Markdown，也可以创建 slug 为 `about` 的页面来覆盖它。"
+    "这里是关于页面。可以在后台“页面”工作台使用 Markdown 编辑。"
 };
 
 const previousThemeSettingKey = "previousTheme";
@@ -89,7 +146,8 @@ function postSelect(prefix = "p") {
     ${prefix}.seo_title AS seoTitle,
     ${prefix}.seo_description AS seoDescription,
     ${prefix}.created_at AS createdAt,
-    ${prefix}.updated_at AS updatedAt
+    ${prefix}.updated_at AS updatedAt,
+    ${prefix}.version
   `;
 }
 
@@ -148,6 +206,26 @@ export function getSiteSettings(): SiteSettings {
   return data;
 }
 
+export function getSiteConfigurationVersion() {
+  return get<{ version: number }>(
+    "SELECT version FROM site_configuration_meta WHERE id = 1"
+  )?.version ?? 1;
+}
+
+export function getSiteConfiguration(): SiteConfiguration {
+  // Settings, modules, navigation, and their version form one optimistic-
+  // concurrency snapshot. Reading them in a transaction prevents a writer in
+  // another process from committing between the individual SELECTs and
+  // pairing old values with a new version.
+  return readTransaction(() => ({
+    settings: getSiteSettings(),
+    modules: getHomeModules(),
+    mainLinks: getNavLinks("main"),
+    frequentLinks: getNavLinks("frequent"),
+    version: getSiteConfigurationVersion()
+  }));
+}
+
 export function updateSiteSettings(input: Partial<SiteSettings>) {
   transaction(() => {
     for (const [key, value] of Object.entries(input)) {
@@ -177,7 +255,19 @@ export function getHomeModules() {
 }
 
 export function updateHomeModules(modules: HomeModule[]) {
+  if (
+    modules.length !== homeModuleIds.length ||
+    new Set(modules.map((module) => module.id)).size !== modules.length ||
+    modules.some((module) => !homeModuleIdSet.has(module.id))
+  ) {
+    throw new Error("Home modules must contain each supported module exactly once.");
+  }
+
   transaction(() => {
+    run(
+      `DELETE FROM home_modules
+       WHERE id NOT IN ('recentPosts', 'now', 'projects', 'frequentLinks', 'stack')`
+    );
     for (const module of modules) {
       run(
         `INSERT INTO home_modules (id, enabled, sort_order, config)
@@ -198,6 +288,9 @@ export function updateHomeModules(modules: HomeModule[]) {
 }
 
 export function updateHomeModuleConfig(id: string, config: Record<string, unknown>) {
+  if (!homeModuleIdSet.has(id)) {
+    throw new Error(`Unsupported home module: ${id || "(empty)"}.`);
+  }
   run(
     "UPDATE home_modules SET config = ? WHERE id = ?",
     [JSON.stringify(config), id]
@@ -240,12 +333,38 @@ export function updateSiteConfiguration(input: {
   modules: HomeModule[];
   mainLinks: Omit<NavLink, "id" | "groupName">[];
   frequentLinks: Omit<NavLink, "id" | "groupName">[];
-}) {
-  transaction(() => {
+}, expectedVersion?: number) {
+  return transaction(() => {
+    const currentVersion = getSiteConfigurationVersion();
+    if (expectedVersion !== undefined && expectedVersion !== currentVersion) {
+      throw new VersionConflictError("site-configuration", currentVersion);
+    }
+
+    const versionUpdate = expectedVersion === undefined
+      ? run(
+          `UPDATE site_configuration_meta
+           SET version = version + 1, updated_at = ?
+           WHERE id = 1`,
+          [new Date().toISOString()]
+        )
+      : run(
+          `UPDATE site_configuration_meta
+           SET version = version + 1, updated_at = ?
+           WHERE id = 1 AND version = ?`,
+          [new Date().toISOString(), expectedVersion]
+        );
+    if (versionUpdate.changes !== 1) {
+      throw new VersionConflictError(
+        "site-configuration",
+        getSiteConfigurationVersion()
+      );
+    }
+
     updateSiteSettings(input.settings);
     updateHomeModules(input.modules);
     replaceNavLinks("main", input.mainLinks);
     replaceNavLinks("frequent", input.frequentLinks);
+    return getSiteConfiguration();
   });
 }
 
@@ -256,27 +375,67 @@ export function isSetupComplete() {
 }
 
 export function createAdminUser(username: string, passwordHash: string) {
-  if (isSetupComplete()) {
-    throw new Error("Setup is already complete.");
-  }
-  run("INSERT INTO admin_users (username, password_hash) VALUES (?, ?)", [
-    username,
-    passwordHash
-  ]);
+  return transaction(() => {
+    if (isSetupComplete()) {
+      throw new Error("Setup is already complete.");
+    }
+    const result = run(
+      "INSERT INTO admin_users (username, password_hash) VALUES (?, ?)",
+      [username, passwordHash]
+    );
+    return getAdminById(Number(result.lastInsertRowid))!;
+  });
 }
 
 export function getAdminByUsername(username: string) {
-  return get<{ id: number; username: string; passwordHash: string }>(
-    "SELECT id, username, password_hash AS passwordHash FROM admin_users WHERE username = ?",
+  return get<AdminUser>(
+    `SELECT
+       id,
+       username,
+       password_hash AS passwordHash,
+       session_version AS sessionVersion
+     FROM admin_users
+     WHERE username = ?`,
     [username]
   );
 }
 
 export function getAdminById(id: number) {
-  return get<{ id: number; username: string }>(
-    "SELECT id, username FROM admin_users WHERE id = ?",
+  return get<AdminIdentity>(
+    `SELECT
+       id,
+       username,
+       session_version AS sessionVersion
+     FROM admin_users
+     WHERE id = ?`,
     [id]
   );
+}
+
+export function changeAdminPassword(
+  id: number,
+  expectedPasswordHash: string,
+  passwordHash: string
+) {
+  return transaction(() => {
+    const result = run(
+      `UPDATE admin_users
+       SET password_hash = ?, session_version = session_version + 1
+       WHERE id = ? AND password_hash = ?`,
+      [passwordHash, id, expectedPasswordHash]
+    );
+    return result.changes === 1 ? getAdminById(id) : null;
+  });
+}
+
+export function revokeAdminSessions(id: number) {
+  return transaction(() => {
+    const result = run(
+      "UPDATE admin_users SET session_version = session_version + 1 WHERE id = ?",
+      [id]
+    );
+    return result.changes === 1 ? getAdminById(id) : null;
+  });
 }
 
 export function makeUniqueSlug(type: PostType, desired: string, excludeId?: number) {
@@ -311,7 +470,8 @@ function postSummarySelect(prefix = "p") {
     ${prefix}.status,
     ${prefix}.published_at AS publishedAt,
     ${prefix}.created_at AS createdAt,
-    ${prefix}.updated_at AS updatedAt
+    ${prefix}.updated_at AS updatedAt,
+    ${prefix}.version
   `;
 }
 
@@ -339,6 +499,15 @@ export type ThemeSelection = {
   previousTheme: string | null;
 };
 
+export class ThemeSelectionConflictError extends Error {
+  readonly code = "THEME_SELECTION_CONFLICT";
+
+  constructor(readonly current: ThemeSelection) {
+    super("Theme selection was updated in another request.");
+    this.name = "ThemeSelectionConflictError";
+  }
+}
+
 export function getPreviousTheme() {
   const value = readSettingValue(previousThemeSettingKey)?.trim();
   return value || null;
@@ -351,34 +520,73 @@ export function getThemeSelection(): ThemeSelection {
   };
 }
 
-export function activateTheme(themeId: string): ThemeSelection {
+export function activateTheme(
+  themeId: string,
+  expectedActiveTheme?: string
+): ThemeSelection {
   const target = themeId.trim();
   if (!target) throw new Error("Theme id is required.");
 
   return transaction(() => {
-    const current = getSiteSettings().activeTheme;
-    if (current === target) {
-      return {
-        activeTheme: current,
-        previousTheme: getPreviousTheme()
-      };
+    const current = getThemeSelection();
+    if (current.activeTheme === target) {
+      if (
+        expectedActiveTheme !== undefined &&
+        expectedActiveTheme !== target &&
+        current.previousTheme !== expectedActiveTheme
+      ) {
+        throw new ThemeSelectionConflictError(current);
+      }
+      return current;
+    }
+    if (
+      expectedActiveTheme !== undefined &&
+      current.activeTheme !== expectedActiveTheme
+    ) {
+      throw new ThemeSelectionConflictError(current);
     }
 
-    writeSettingValue(previousThemeSettingKey, current);
+    writeSettingValue(previousThemeSettingKey, current.activeTheme);
     writeSettingValue("activeTheme", target);
     return {
       activeTheme: target,
-      previousTheme: current
+      previousTheme: current.activeTheme
     };
   });
 }
 
-export function rollbackTheme(): ThemeSelection | null {
-  const selection = getThemeSelection();
-  if (!selection.previousTheme || selection.previousTheme === selection.activeTheme) {
-    return null;
-  }
-  return activateTheme(selection.previousTheme);
+export function rollbackTheme(
+  targetTheme: string,
+  expectedActiveTheme: string
+): ThemeSelection | null {
+  const target = targetTheme.trim();
+  const expected = expectedActiveTheme.trim();
+  return transaction(() => {
+    const current = getThemeSelection();
+    if (
+      current.activeTheme === target &&
+      current.previousTheme === expected
+    ) {
+      return current;
+    }
+    if (current.activeTheme !== expected) {
+      throw new ThemeSelectionConflictError(current);
+    }
+    if (
+      !target ||
+      target === expected ||
+      current.previousTheme !== target
+    ) {
+      return null;
+    }
+
+    writeSettingValue(previousThemeSettingKey, expected);
+    writeSettingValue("activeTheme", target);
+    return {
+      activeTheme: target,
+      previousTheme: expected
+    };
+  });
 }
 
 function makeSequentialSlug(type: PostType, excludeId?: number) {
@@ -498,6 +706,16 @@ function savePostInternal(input: SavePostInput) {
   const title = input.title.trim() || "Untitled";
   const now = new Date().toISOString();
   const existing = input.id ? getPostById(input.id) : null;
+  if (input.id && !existing) {
+    throw new Error("Post not found.");
+  }
+  if (
+    existing &&
+    input.expectedVersion !== undefined &&
+    input.expectedVersion !== existing.version
+  ) {
+    throw new VersionConflictError("post", existing.version, existing.id);
+  }
   const markdown = input.markdown ?? "";
   const excerpt = input.excerpt?.trim() || null;
   const cover = input.cover?.trim() || null;
@@ -533,7 +751,7 @@ function savePostInternal(input: SavePostInput) {
     if (!reason) return existing;
 
     createPostRevision(existing, reason);
-    run(
+    const result = run(
       `UPDATE posts SET
         type = ?,
         slug = ?,
@@ -545,8 +763,9 @@ function savePostInternal(input: SavePostInput) {
         published_at = ?,
         seo_title = ?,
         seo_description = ?,
-        updated_at = ?
-      WHERE id = ?`,
+        updated_at = ?,
+        version = version + 1
+      WHERE id = ? AND version = ?`,
       [
         next.type,
         slug,
@@ -559,9 +778,17 @@ function savePostInternal(input: SavePostInput) {
         seoTitle,
         seoDescription,
         now,
-        id
+        id,
+        existing.version
       ]
     );
+    if (result.changes !== 1) {
+      throw new VersionConflictError(
+        "post",
+        getPostById(id)?.version ?? existing.version,
+        id
+      );
+    }
   } else {
     const result = run(
       `INSERT INTO posts (
@@ -604,6 +831,35 @@ function syncPostTags(postId: number, tagNames: string[]) {
       ]);
     }
   }
+  deleteOrphanedTags();
+}
+
+function publicPostSummarySelect(prefix = "p") {
+  return `
+    ${prefix}.id,
+    ${prefix}.type,
+    ${prefix}.slug,
+    ${prefix}.title,
+    ${prefix}.excerpt,
+    ${prefix}.cover,
+    ${prefix}.published_at AS publishedAt,
+    ${prefix}.created_at AS createdAt,
+    ${prefix}.updated_at AS updatedAt
+  `;
+}
+
+function normalizePublicPostSummary(
+  row: StoredPublicPostSummary
+): StoredPublicPostSummary {
+  return {
+    ...row,
+    publishedAt: row.publishedAt ?? null,
+    excerpt: row.excerpt ?? null,
+    cover: row.cover ?? null
+  };
+}
+
+function deleteOrphanedTags() {
   run(
     "DELETE FROM tags WHERE NOT EXISTS (SELECT 1 FROM post_tags WHERE post_tags.tag_id = tags.id)"
   );
@@ -674,6 +930,14 @@ export function listPosts(options: {
   }
   const posts = all<PostRecord>(sql, params).map(normalizePost);
   return options.includeTags === false ? posts : posts.map(withTags);
+}
+
+export function listAdminPages() {
+  return listPosts({
+    type: "page",
+    includeTrashed: true,
+    includeTags: false
+  });
 }
 
 export type ListAdminPostSummariesOptions = {
@@ -758,6 +1022,148 @@ function loadTagsForPosts<T extends { id: number }>(posts: T[]) {
   return posts.map((post) => ({ ...post, tags: tagsByPost.get(post.id) ?? [] }));
 }
 
+type PublicPostFilters = {
+  type?: PostType;
+  tagSlug?: string;
+};
+
+function publishedPostWhere(options: PublicPostFilters) {
+  const where = ["p.status = 'published'"];
+  const params: unknown[] = [];
+  let join = "";
+
+  if (options.tagSlug) {
+    join =
+      " INNER JOIN post_tags filter_pt ON filter_pt.post_id = p.id" +
+      " INNER JOIN tags filter_t ON filter_t.id = filter_pt.tag_id";
+    where.push("filter_t.slug = ?");
+    params.push(options.tagSlug);
+  }
+  if (options.type) {
+    where.push("p.type = ?");
+    params.push(options.type);
+  } else {
+    where.push("p.type != 'page'");
+  }
+
+  return { join, where, params };
+}
+
+function boundedPositiveInteger(
+  value: number | undefined,
+  fallback: number,
+  maximum: number
+) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
+  return Math.min(maximum, Math.max(1, Math.floor(value)));
+}
+
+export function listPublishedPostSummaries(
+  options: PublicPostFilters & {
+    limit?: number;
+    includeTags?: boolean;
+  } = {}
+) {
+  const limit = boundedPositiveInteger(
+    options.limit,
+    PUBLIC_COLLECTION_PAGE_SIZE,
+    100
+  );
+  const { join, where, params } = publishedPostWhere(options);
+
+  return readTransaction(() => {
+    const rows = all<StoredPublicPostSummary>(
+      `SELECT ${publicPostSummarySelect("p")}
+       FROM posts p${join}
+       WHERE ${where.join(" AND ")}
+       ORDER BY COALESCE(p.published_at, p.created_at) DESC, p.id DESC
+       LIMIT ?`,
+      [...params, limit]
+    ).map(normalizePublicPostSummary);
+
+    if (options.includeTags === false) {
+      return rows.map((post) => ({ ...post, tags: [] })) satisfies PublicPostSummary[];
+    }
+    return loadTagsForPosts(rows) satisfies PublicPostSummary[];
+  });
+}
+
+export function listPublishedPostSummaryPage(
+  options: PublicPostFilters & {
+    page?: number;
+    pageSize?: number;
+  } = {}
+): PublicPostSummaryPage {
+  const requestedPage = boundedPositiveInteger(options.page, 1, 999_999_999);
+  const pageSize = boundedPositiveInteger(
+    options.pageSize,
+    PUBLIC_COLLECTION_PAGE_SIZE,
+    50
+  );
+  const { join, where, params } = publishedPostWhere(options);
+
+  return readTransaction(() => {
+    const total =
+      get<CountRow>(
+        `SELECT COUNT(*) AS count
+         FROM posts p${join}
+         WHERE ${where.join(" AND ")}`,
+        params
+      )?.count ?? 0;
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+    const page = Math.min(requestedPage, totalPages);
+    const rows = all<StoredPublicPostSummary>(
+      `SELECT ${publicPostSummarySelect("p")}
+       FROM posts p${join}
+       WHERE ${where.join(" AND ")}
+       ORDER BY COALESCE(p.published_at, p.created_at) DESC, p.id DESC
+       LIMIT ? OFFSET ?`,
+      [...params, pageSize, (page - 1) * pageSize]
+    ).map(normalizePublicPostSummary);
+
+    return {
+      posts: loadTagsForPosts(rows),
+      total,
+      page,
+      pageSize,
+      totalPages
+    };
+  });
+}
+
+export function listPublishedFeedItems(limit = 50) {
+  const boundedLimit = boundedPositiveInteger(limit, 50, 100);
+  return all<PublicFeedItem>(
+    `SELECT
+       p.type,
+       p.slug,
+       p.title,
+       p.excerpt,
+       p.seo_description AS seoDescription,
+       p.published_at AS publishedAt,
+       p.created_at AS createdAt,
+       p.updated_at AS updatedAt
+     FROM posts p
+     WHERE p.type = 'post' AND p.status = 'published'
+     ORDER BY COALESCE(p.published_at, p.created_at) DESC, p.id DESC
+     LIMIT ?`,
+    [boundedLimit]
+  );
+}
+
+export function listPublishedSitemapEntries(type: PostType) {
+  return all<PublicSitemapEntry>(
+    `SELECT
+       p.type,
+       p.slug,
+       p.updated_at AS updatedAt
+     FROM posts p
+     WHERE p.type = ? AND p.status = 'published'
+     ORDER BY p.id ASC`,
+    [type]
+  );
+}
+
 export function listAdminPostSummaries(options: ListAdminPostSummariesOptions = {}) {
   const requestedLimit = Math.floor(options.limit ?? 20);
   const limit = Math.min(100, Math.max(1, requestedLimit));
@@ -827,7 +1233,7 @@ export function getTags() {
      FROM tags t
      INNER JOIN post_tags pt ON pt.tag_id = t.id
      INNER JOIN posts p ON p.id = pt.post_id
-     WHERE p.status = 'published'
+     WHERE p.status = 'published' AND p.type != 'page'
      GROUP BY t.id
      ORDER BY t.name ASC`
   );
@@ -840,22 +1246,35 @@ export function getTagBySlug(slug: string) {
      WHERE t.slug = ?
        AND EXISTS (
          SELECT 1
-         FROM post_tags pt
-         INNER JOIN posts p ON p.id = pt.post_id
-         WHERE pt.tag_id = t.id AND p.status = 'published'
+          FROM post_tags pt
+          INNER JOIN posts p ON p.id = pt.post_id
+          WHERE pt.tag_id = t.id
+            AND p.status = 'published'
+            AND p.type != 'page'
        )`,
     [slug]
   );
 }
 
-export function setPostStatus(id: number, status: PostStatus) {
-  return transaction(() => setPostStatusInternal(id, status));
+export function setPostStatus(
+  id: number,
+  status: PostStatus,
+  expectedVersion?: number
+) {
+  return transaction(() => setPostStatusInternal(id, status, expectedVersion));
 }
 
-function setPostStatusInternal(id: number, status: PostStatus) {
+function setPostStatusInternal(
+  id: number,
+  status: PostStatus,
+  expectedVersion?: number
+) {
   const now = new Date().toISOString();
   const existing = getPostById(id);
   if (!existing) return null;
+  if (expectedVersion !== undefined && expectedVersion !== existing.version) {
+    throw new VersionConflictError("post", existing.version, id);
+  }
   if (existing.status === status) return existing;
 
   const reason =
@@ -872,43 +1291,134 @@ function setPostStatusInternal(id: number, status: PostStatus) {
     status === "published" ? "COALESCE(published_at, ?)" : "published_at";
   const params =
     status === "published"
-      ? [status, now, now, id]
-      : [status, now, id];
-  run(
+      ? [status, now, now, id, existing.version]
+      : [status, now, id, existing.version];
+  const result = run(
     `UPDATE posts SET
       status = ?,
       published_at = ${publishedAtSql},
-      updated_at = ?
-     WHERE id = ?`,
+      updated_at = ?,
+      version = version + 1
+     WHERE id = ? AND version = ?`,
     params
   );
+  if (result.changes !== 1) {
+    throw new VersionConflictError(
+      "post",
+      getPostById(id)?.version ?? existing.version,
+      id
+    );
+  }
   return getPostById(id);
 }
 
-export function movePostToTrash(id: number) {
-  return setPostStatus(id, "trashed");
+export function movePostToTrash(id: number, expectedVersion?: number) {
+  return setPostStatus(id, "trashed", expectedVersion);
 }
 
-export function restorePostFromTrash(id: number) {
-  return setPostStatus(id, "draft");
+export function restorePostFromTrash(id: number, expectedVersion?: number) {
+  return setPostStatus(id, "draft", expectedVersion);
 }
 
-export function deletePostPermanently(id: number) {
-  run("DELETE FROM posts WHERE id = ?", [id]);
+export function deletePostPermanently(id: number, expectedVersion?: number) {
+  return transaction(() => {
+    const existing = getPostById(id);
+    if (!existing) return false;
+    if (expectedVersion !== undefined && expectedVersion !== existing.version) {
+      throw new VersionConflictError("post", existing.version, id);
+    }
+    const result = run(
+      "DELETE FROM posts WHERE id = ? AND version = ?",
+      [id, existing.version]
+    );
+    if (result.changes !== 1) {
+      throw new VersionConflictError(
+        "post",
+        getPostById(id)?.version ?? existing.version,
+        id
+      );
+    }
+    deleteOrphanedTags();
+    return true;
+  });
 }
 
 export function listPostRevisions(postId: number, limit = 20) {
-  return all<StoredPostRevision>(
-    `SELECT ${revisionSelect("r")}
-     FROM post_revisions r
-     WHERE r.post_id = ?
-     ORDER BY r.created_at DESC, r.id DESC
-     LIMIT ?`,
-    [postId, limit]
-  ).map(normalizeRevision);
+  return listPostRevisionPage(postId, { limit }).revisions;
 }
 
-export function restorePostRevision(postId: number, revisionId: number) {
+function parsePostRevisionCursor(cursor: string) {
+  const separator = cursor.lastIndexOf("|");
+  const createdAt = cursor.slice(0, separator);
+  const id = Number(cursor.slice(separator + 1));
+  if (
+    separator < 1 ||
+    createdAt.length > 64 ||
+    !Number.isInteger(id) ||
+    id <= 0
+  ) {
+    throw new RangeError("Invalid revision cursor.");
+  }
+  return { createdAt, id };
+}
+
+export function listPostRevisionPage(
+  postId: number,
+  {
+    cursor = null,
+    limit = 20
+  }: {
+    cursor?: string | null;
+    limit?: number;
+  } = {}
+): PostRevisionPage {
+  if (!Number.isInteger(limit) || limit < 1 || limit > 50) {
+    throw new RangeError("Revision page limit must be between 1 and 50.");
+  }
+
+  return readTransaction(() => {
+    const after = cursor ? parsePostRevisionCursor(cursor) : null;
+    const params: unknown[] = [postId];
+    let cursorSql = "";
+    if (after) {
+      cursorSql =
+        " AND (r.created_at < ? OR (r.created_at = ? AND r.id < ?))";
+      params.push(after.createdAt, after.createdAt, after.id);
+    }
+    params.push(limit + 1);
+
+    const rows = all<StoredPostRevision>(
+      `SELECT ${revisionSelect("r")}
+       FROM post_revisions r
+       WHERE r.post_id = ?${cursorSql}
+       ORDER BY r.created_at DESC, r.id DESC
+       LIMIT ?`,
+      params
+    );
+    const total =
+      get<CountRow>(
+        "SELECT COUNT(*) AS count FROM post_revisions WHERE post_id = ?",
+        [postId]
+      )?.count ?? 0;
+    const hasMore = rows.length > limit;
+    const pageRows = hasMore ? rows.slice(0, limit) : rows;
+    const revisions = pageRows.map(normalizeRevision);
+    const last = revisions.at(-1);
+
+    return {
+      revisions,
+      total,
+      hasMore,
+      nextCursor: hasMore && last ? `${last.createdAt}|${last.id}` : null
+    };
+  });
+}
+
+export function restorePostRevision(
+  postId: number,
+  revisionId: number,
+  expectedVersion?: number
+) {
   return transaction(() => {
     const current = getPostById(postId);
     const revision = get<StoredPostRevision>(
@@ -918,6 +1428,9 @@ export function restorePostRevision(postId: number, revisionId: number) {
       [revisionId, postId]
     );
     if (!current || !revision) return null;
+    if (expectedVersion !== undefined && expectedVersion !== current.version) {
+      throw new VersionConflictError("post", current.version, postId);
+    }
 
     const snapshot = normalizeRevision(revision);
     const now = new Date().toISOString();
@@ -928,7 +1441,7 @@ export function restorePostRevision(postId: number, revisionId: number) {
         : (current.publishedAt ?? snapshot.publishedAt ?? null);
 
     createPostRevision(current, "restore-before");
-    run(
+    const result = run(
       `UPDATE posts SET
         type = ?,
         slug = ?,
@@ -940,8 +1453,9 @@ export function restorePostRevision(postId: number, revisionId: number) {
         published_at = ?,
         seo_title = ?,
         seo_description = ?,
-        updated_at = ?
-       WHERE id = ?`,
+        updated_at = ?,
+        version = version + 1
+       WHERE id = ? AND version = ?`,
       [
         snapshot.type,
         slug,
@@ -954,9 +1468,17 @@ export function restorePostRevision(postId: number, revisionId: number) {
         snapshot.seoTitle,
         snapshot.seoDescription,
         now,
-        postId
+        postId,
+        current.version
       ]
     );
+    if (result.changes !== 1) {
+      throw new VersionConflictError(
+        "post",
+        getPostById(postId)?.version ?? current.version,
+        postId
+      );
+    }
     if (snapshot.tags !== null) {
       syncPostTags(postId, snapshot.tags);
     }
@@ -1003,10 +1525,147 @@ export function addMedia(input: Omit<MediaRecord, "id" | "createdAt">) {
   )!;
 }
 
+export function getMediaById(id: number) {
+  return get<MediaRecord>(
+    `SELECT
+       id,
+       filename,
+       original_name AS originalName,
+       mime,
+       size,
+       url,
+       created_at AS createdAt
+     FROM media
+     WHERE id = ?`,
+    [id]
+  );
+}
+
 export function listMedia() {
   return all<MediaRecord>(
     "SELECT id, filename, original_name AS originalName, mime, size, url, created_at AS createdAt FROM media ORDER BY id DESC"
   );
+}
+
+export function findMediaReferences(url: string): MediaReference[] {
+  const references: MediaReference[] = [];
+  const posts = all<{
+    id: number;
+    title: string;
+    cover: string | null;
+    markdown: string;
+  }>(
+    `SELECT id, title, cover, markdown
+     FROM posts
+     WHERE cover = ? OR instr(markdown, ?) > 0`,
+    [url, url]
+  );
+  for (const post of posts) {
+    if (post.cover === url) {
+      references.push({
+        kind: "post",
+        id: String(post.id),
+        label: post.title,
+        field: "cover"
+      });
+    }
+    if (post.markdown.includes(url)) {
+      references.push({
+        kind: "post",
+        id: String(post.id),
+        label: post.title,
+        field: "markdown"
+      });
+    }
+  }
+
+  const revisions = all<{
+    id: number;
+    postId: number;
+    title: string;
+    cover: string | null;
+    markdown: string;
+  }>(
+    `SELECT id, post_id AS postId, title, cover, markdown
+     FROM post_revisions
+     WHERE cover = ? OR instr(markdown, ?) > 0`,
+    [url, url]
+  );
+  for (const revision of revisions) {
+    if (revision.cover === url) {
+      references.push({
+        kind: "revision",
+        id: String(revision.id),
+        label: `${revision.title}（版本 ${revision.id}）`,
+        field: "cover"
+      });
+    }
+    if (revision.markdown.includes(url)) {
+      references.push({
+        kind: "revision",
+        id: String(revision.id),
+        label: `${revision.title}（版本 ${revision.id}）`,
+        field: "markdown"
+      });
+    }
+  }
+
+  for (const link of all<{ id: number; label: string }>(
+    "SELECT id, label FROM nav_links WHERE icon_url = ?",
+    [url]
+  )) {
+    references.push({
+      kind: "navigation",
+      id: String(link.id),
+      label: link.label,
+      field: "iconUrl"
+    });
+  }
+
+  for (const setting of all<{ key: string }>(
+    "SELECT key FROM settings WHERE instr(value, ?) > 0",
+    [url]
+  )) {
+    references.push({
+      kind: "setting",
+      id: setting.key,
+      label: `站点设置 ${setting.key}`,
+      field: "value"
+    });
+  }
+
+  for (const module of all<{ id: string }>(
+    "SELECT id FROM home_modules WHERE instr(config, ?) > 0",
+    [url]
+  )) {
+    references.push({
+      kind: "home-module",
+      id: module.id,
+      label: `首页模块 ${module.id}`,
+      field: "config"
+    });
+  }
+
+  return references;
+}
+
+export function deleteMediaRecord(
+  id: number,
+  options: { allowReferenced?: boolean } = {}
+) {
+  return transaction(() => {
+    const media = getMediaById(id);
+    if (!media) return null;
+    const references = findMediaReferences(media.url);
+    if (references.length && !options.allowReferenced) {
+      throw new MediaInUseError(references);
+    }
+    const result = run("DELETE FROM media WHERE id = ?", [id]);
+    if (result.changes !== 1) {
+      throw new Error("Media record changed while deleting.");
+    }
+    return { media, references };
+  });
 }
 
 export function addThemeInstall(input: Omit<ThemeInstallRecord, "id" | "createdAt">) {

@@ -1,5 +1,9 @@
-import { isAdminContentType, type AdminContentType } from "@/lib/content/content-types";
-import type { PostStatus } from "@/types/blog";
+import {
+  contentHref,
+  isAdminContentType,
+  type AdminContentType
+} from "@/lib/content/content-types";
+import type { PostStatus, PostType } from "@/types/blog";
 
 export const ADMIN_CONTENT_PAGE_SIZE = 20;
 
@@ -49,4 +53,18 @@ export function adminContentListHref({
   if (Number.isSafeInteger(page) && page > 1) params.set("page", String(page));
   const search = params.toString();
   return search ? `/admin/posts?${search}` : "/admin/posts";
+}
+
+export function adminPublicContentHref(input: {
+  status: PostStatus;
+  type: PostType;
+  slug: string;
+}) {
+  return input.status === "published"
+    ? contentHref(input.type, input.slug)
+    : null;
+}
+
+export function adminPublicTagHref(status: PostStatus, slug: string) {
+  return status === "published" ? `/tag/${slug}` : null;
 }

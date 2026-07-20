@@ -1,37 +1,26 @@
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
-import http from "node:http";
-import https from "node:https";
 import path from "node:path";
-import tls from "node:tls";
 import { NextResponse } from "next/server";
 import { requireAdminForApi } from "@/lib/auth/session";
+import { clientIpFromHeaders } from "@/lib/auth/login-rate-limit";
 import { validateMediaFile } from "@/lib/media/file-validation";
-import { proxyForUrl } from "@/lib/net/proxy";
-import { tunneledHttpsRequestOptions } from "@/lib/net/tunnel";
+import { writeMediaFileAtomically } from "@/lib/media/storage";
+import {
+  fetchUrlSafely,
+  resolvePublicTarget,
+  SafeFetchError,
+  TimeoutError
+} from "@/lib/net/safe-fetch";
 import { ensureUploadsDir, getUploadsDir } from "@/lib/paths";
+import { auditLog, auditRequestId } from "@/lib/observability/audit";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-class TimeoutError extends Error {
-  constructor() {
-    super("Request timed out");
-    this.name = "TimeoutError";
-  }
-}
-
 const iconMaxBytes = 1024 * 1024;
 const localIconDir = "link-icons";
 const iconExtensions = [".ico", ".png", ".webp", ".gif", ".jpg", ".jpeg", ".avif"];
-
-type FetchResult = {
-  ok: boolean;
-  status: number;
-  url: string;
-  headers: Map<string, string>;
-  body: Buffer;
-};
 
 function readAttribute(source: string, name: string) {
   const pattern = new RegExp(`${name}\\s*=\\s*["']([^"']+)["']`, "i");
@@ -77,207 +66,6 @@ function fallbackIconUrl(target: URL) {
   return new URL("/favicon.ico", target).toString();
 }
 
-function headersFromResponse(headers: http.IncomingHttpHeaders) {
-  const map = new Map<string, string>();
-  for (const [key, value] of Object.entries(headers)) {
-    if (Array.isArray(value)) {
-      map.set(key.toLowerCase(), value.join(", "));
-    } else if (value !== undefined) {
-      map.set(key.toLowerCase(), String(value));
-    }
-  }
-  return map;
-}
-
-function proxyAuthHeader(proxy: URL) {
-  if (!proxy.username) return null;
-  return `Basic ${Buffer.from(`${decodeURIComponent(proxy.username)}:${decodeURIComponent(proxy.password)}`).toString("base64")}`;
-}
-
-function collectResponse(
-  response: http.IncomingMessage,
-  finalUrl: string,
-  maxBytes: number
-) {
-  return new Promise<FetchResult>((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    let total = 0;
-    response.on("data", (chunk: Buffer) => {
-      total += chunk.length;
-      if (total > maxBytes) {
-        response.destroy(new Error("Response is too large."));
-        return;
-      }
-      chunks.push(chunk);
-    });
-    response.on("end", () => {
-      resolve({
-        ok: (response.statusCode ?? 0) >= 200 && (response.statusCode ?? 0) < 300,
-        status: response.statusCode ?? 0,
-        url: finalUrl,
-        headers: headersFromResponse(response.headers),
-        body: Buffer.concat(chunks)
-      });
-    });
-    response.on("error", reject);
-  });
-}
-
-function requestDirect(target: URL, headers: Record<string, string>, timeoutMs: number, maxBytes: number) {
-  return new Promise<FetchResult>((resolve, reject) => {
-    const client = target.protocol === "https:" ? https : http;
-    const request = client.request(
-      {
-        protocol: target.protocol,
-        hostname: target.hostname,
-        port: target.port || (target.protocol === "https:" ? 443 : 80),
-        path: `${target.pathname}${target.search}`,
-        method: "GET",
-        headers: {
-          ...headers,
-          Host: target.host,
-          Connection: "close"
-        },
-        timeout: timeoutMs
-      },
-      (response) => {
-        collectResponse(response, response.headers.location ? new URL(response.headers.location, target).toString() : target.toString(), maxBytes)
-          .then(resolve)
-          .catch(reject);
-      }
-    );
-    request.on("timeout", () => request.destroy(new TimeoutError()));
-    request.on("error", reject);
-    request.end();
-  });
-}
-
-function requestViaProxy(target: URL, proxy: URL, headers: Record<string, string>, timeoutMs: number, maxBytes: number) {
-  if (target.protocol === "http:") {
-    return requestHttpViaProxy(target, proxy, headers, timeoutMs, maxBytes);
-  }
-  return requestHttpsViaProxy(target, proxy, headers, timeoutMs, maxBytes);
-}
-
-function requestHttpViaProxy(target: URL, proxy: URL, headers: Record<string, string>, timeoutMs: number, maxBytes: number) {
-  return new Promise<FetchResult>((resolve, reject) => {
-    const auth = proxyAuthHeader(proxy);
-    const proxyClient = proxy.protocol === "https:" ? https : http;
-    const request = proxyClient.request(
-      {
-        protocol: proxy.protocol,
-        hostname: proxy.hostname,
-        port: proxy.port || (proxy.protocol === "https:" ? 443 : 80),
-        path: target.toString(),
-        method: "GET",
-        headers: {
-          ...headers,
-          Host: target.host,
-          ...(auth ? { "Proxy-Authorization": auth } : {}),
-          Connection: "close"
-        },
-        timeout: timeoutMs
-      },
-      (response) => {
-        collectResponse(response, response.headers.location ? new URL(response.headers.location, target).toString() : target.toString(), maxBytes)
-          .then(resolve)
-          .catch(reject);
-      }
-    );
-    request.on("timeout", () => request.destroy(new TimeoutError()));
-    request.on("error", reject);
-    request.end();
-  });
-}
-
-function requestHttpsViaProxy(target: URL, proxy: URL, headers: Record<string, string>, timeoutMs: number, maxBytes: number) {
-  return new Promise<FetchResult>((resolve, reject) => {
-    const auth = proxyAuthHeader(proxy);
-    const proxyClient = proxy.protocol === "https:" ? https : http;
-    const authority = `${target.hostname}:${target.port || 443}`;
-    const connectRequest = proxyClient.request({
-      hostname: proxy.hostname,
-      port: proxy.port || (proxy.protocol === "https:" ? 443 : 80),
-      method: "CONNECT",
-      path: authority,
-      headers: {
-        Host: authority,
-        ...(auth ? { "Proxy-Authorization": auth } : {})
-      },
-      timeout: timeoutMs
-    });
-
-    connectRequest.on("connect", (response, socket) => {
-      if (response.statusCode !== 200) {
-        socket.destroy();
-        reject(new Error(`Proxy CONNECT returned ${response.statusCode}`));
-        return;
-      }
-
-      const secureSocket = tls.connect({
-        socket,
-        servername: target.hostname
-      });
-      secureSocket.on("error", reject);
-      secureSocket.on("secureConnect", () => {
-        const request = https.request(
-          tunneledHttpsRequestOptions(target, headers, secureSocket, timeoutMs),
-          (iconResponse) => {
-            collectResponse(iconResponse, iconResponse.headers.location ? new URL(iconResponse.headers.location, target).toString() : target.toString(), maxBytes)
-              .then(resolve)
-              .catch(reject);
-          }
-        );
-        request.on("timeout", () => request.destroy(new TimeoutError()));
-        request.on("error", reject);
-        request.end();
-      });
-    });
-    connectRequest.on("timeout", () => connectRequest.destroy(new TimeoutError()));
-    connectRequest.on("error", reject);
-    connectRequest.end();
-  });
-}
-
-async function fetchUrl(
-  input: string,
-  {
-    accept,
-    timeoutMs,
-    maxBytes,
-    redirects = 4
-  }: {
-    accept: string;
-    timeoutMs: number;
-    maxBytes: number;
-    redirects?: number;
-  }
-): Promise<FetchResult> {
-  const target = new URL(input);
-  const headers = {
-    Accept: accept,
-    "User-Agent": "Mozilla/5.0 ManJyunBlog/0.1 favicon fetcher"
-  };
-  const proxy = proxyForUrl(target);
-  const result = proxy
-    ? await requestViaProxy(target, proxy, headers, timeoutMs, maxBytes)
-    : await requestDirect(target, headers, timeoutMs, maxBytes);
-
-  if ([301, 302, 303, 307, 308].includes(result.status)) {
-    const location = result.headers.get("location");
-    if (location && redirects > 0) {
-      return fetchUrl(new URL(location, target).toString(), {
-        accept,
-        timeoutMs,
-        maxBytes,
-        redirects: redirects - 1
-      });
-    }
-  }
-
-  return result;
-}
-
 function iconCacheHash(iconUrl: string) {
   return crypto.createHash("sha256").update(iconUrl).digest("hex").slice(0, 28);
 }
@@ -304,10 +92,12 @@ async function readCachedIcon(iconUrl: string) {
 }
 
 async function cacheRemoteIcon(iconUrl: string, timeoutMs = 5200) {
+  // Validate even cache hits so blocked URLs cannot bypass the policy via an old file.
+  await resolvePublicTarget(new URL(iconUrl), undefined, timeoutMs);
   const cached = await readCachedIcon(iconUrl);
   if (cached) return cached;
 
-  const response = await fetchUrl(iconUrl, {
+  const response = await fetchUrlSafely(iconUrl, {
     accept: "image/avif,image/webp,image/png,image/jpeg,image/gif,image/x-icon,*/*;q=0.5",
     timeoutMs,
     maxBytes: iconMaxBytes
@@ -333,37 +123,100 @@ async function cacheRemoteIcon(iconUrl: string, timeoutMs = 5200) {
   }
   const target = localIconPath(iconUrl, validated.extension);
   ensureUploadsDir();
-  await fs.mkdir(path.dirname(target.fullPath), { recursive: true });
-  try {
-    await fs.writeFile(target.fullPath, buffer, { flag: "wx" });
-  } catch (error) {
-    if (!(error && typeof error === "object" && "code" in error && error.code === "EEXIST")) {
-      throw error;
-    }
-  }
+  await writeMediaFileAtomically(
+    `${localIconDir}/${path.basename(target.fullPath)}`,
+    buffer
+  );
   return target.publicUrl;
+}
+
+function isTargetPolicyError(error: unknown) {
+  return (
+    error instanceof SafeFetchError &&
+    ["INVALID_URL", "UNSUPPORTED_PROTOCOL", "TARGET_NOT_PUBLIC", "INVALID_DNS_RESPONSE"].includes(
+      error.code
+    )
+  );
+}
+
+function errorResponse(
+  status: number,
+  code: string,
+  message: string,
+  details: Record<string, unknown> = {}
+) {
+  return NextResponse.json(
+    {
+      ok: false,
+      error: message,
+      code,
+      details
+    },
+    { status }
+  );
 }
 
 export async function POST(request: Request) {
   const admin = await requireAdminForApi();
-  if (!admin) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+  if (!admin) {
+    return errorResponse(401, "UNAUTHORIZED", "Unauthorized");
+  }
+  const auditContext = {
+    requestId: auditRequestId(request.headers),
+    source: clientIpFromHeaders(request.headers),
+    actorId: admin.id
+  };
 
-  const body = (await request.json()) as { url?: string };
+  let body: { url?: string };
+  try {
+    const input = (await request.json()) as unknown;
+    body = input && typeof input === "object" ? (input as { url?: string }) : {};
+  } catch {
+    auditLog({
+      action: "link-icon.fetch",
+      outcome: "rejected",
+      ...auditContext,
+      code: "INVALID_JSON"
+    });
+    return errorResponse(400, "INVALID_REQUEST_BODY", "请求正文必须是有效的 JSON。");
+  }
+  if (body.url !== undefined && typeof body.url !== "string") {
+    auditLog({
+      action: "link-icon.fetch",
+      outcome: "rejected",
+      ...auditContext,
+      code: "INVALID_URL"
+    });
+    return errorResponse(400, "INVALID_URL", "请输入可访问的 http(s) 链接。");
+  }
   const target = normalizeUrl(body.url ?? "");
   if (!target || !["http:", "https:"].includes(target.protocol)) {
-    return NextResponse.json(
-      { ok: false, error: "请输入可访问的 http(s) 链接。" },
-      { status: 400 }
-    );
+    auditLog({
+      action: "link-icon.fetch",
+      outcome: "rejected",
+      ...auditContext,
+      code: "INVALID_URL"
+    });
+    return errorResponse(400, "INVALID_URL", "请输入可访问的 http(s) 链接。");
   }
 
   try {
-    const directIcon = await cacheRemoteIcon(fallbackIconUrl(target)).catch(() => "");
+    const directIcon = await cacheRemoteIcon(fallbackIconUrl(target)).catch((error) => {
+      if (isTargetPolicyError(error)) throw error;
+      return "";
+    });
     if (directIcon) {
+      auditLog({
+        action: "link-icon.fetch",
+        outcome: "success",
+        ...auditContext,
+        resourceType: "link-icon",
+        detail: { source: "favicon" }
+      });
       return NextResponse.json({ ok: true, iconUrl: directIcon });
     }
 
-    const response = await fetchUrl(target.toString(), {
+    const response = await fetchUrlSafely(target.toString(), {
       accept: "text/html,application/xhtml+xml",
       timeoutMs: 5500,
       maxBytes: 2 * 1024 * 1024
@@ -372,10 +225,27 @@ export async function POST(request: Request) {
     const html = response.body.toString("utf8");
     const iconUrl = findIcon(html, finalUrl);
     if (iconUrl) {
-      const localIcon = await cacheRemoteIcon(iconUrl).catch(() => "");
+      const localIcon = await cacheRemoteIcon(iconUrl).catch((error) => {
+        if (isTargetPolicyError(error)) throw error;
+        return "";
+      });
+      auditLog({
+        action: "link-icon.fetch",
+        outcome: "success",
+        ...auditContext,
+        resourceType: "link-icon",
+        detail: { source: localIcon ? "cache" : "remote" }
+      });
       return NextResponse.json({ ok: true, iconUrl: localIcon || iconUrl });
     }
 
+    auditLog({
+      action: "link-icon.fetch",
+      outcome: "success",
+      ...auditContext,
+      resourceType: "link-icon",
+      code: "FALLBACK_FAVICON"
+    });
     return NextResponse.json({
       ok: true,
       iconUrl: fallbackIconUrl(finalUrl),
@@ -383,6 +253,13 @@ export async function POST(request: Request) {
     });
   } catch (error) {
     if (error instanceof TimeoutError || error instanceof DOMException) {
+      auditLog({
+        action: "link-icon.fetch",
+        outcome: "success",
+        ...auditContext,
+        resourceType: "link-icon",
+        code: "FALLBACK_TIMEOUT"
+      });
       return NextResponse.json({
         ok: true,
         iconUrl: fallbackIconUrl(target),
@@ -390,9 +267,32 @@ export async function POST(request: Request) {
       });
     }
 
-    return NextResponse.json(
-      { ok: false, error: "无法读取该网页图标，请手动填写图标 URL 或上传图标。" },
-      { status: 502 }
+    if (error instanceof SafeFetchError) {
+      auditLog({
+        action: "link-icon.fetch",
+        outcome: "rejected",
+        ...auditContext,
+        code: error.code
+      });
+      const message =
+        error.code === "TARGET_NOT_PUBLIC"
+          ? "出于安全原因，不能读取本机、局域网或非公网地址。"
+          : error.code === "DNS_RESOLUTION_FAILED"
+            ? "无法解析该网页地址，请检查域名后重试。"
+            : "无法安全读取该网页图标，请手动填写图标 URL 或上传图标。";
+      return errorResponse(error.status, error.code, message, error.details);
+    }
+
+    auditLog({
+      action: "link-icon.fetch",
+      outcome: "failure",
+      ...auditContext,
+      code: "LINK_ICON_FETCH_FAILED"
+    });
+    return errorResponse(
+      502,
+      "LINK_ICON_FETCH_FAILED",
+      "无法读取该网页图标，请手动填写图标 URL 或上传图标。"
     );
   }
 }

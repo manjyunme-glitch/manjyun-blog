@@ -5,6 +5,11 @@ import type { ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import type { ThemeInstallRecord } from "@/types/blog";
 import type { ThemeDefinition } from "@/themes/types";
+import {
+  clearPersistentOperationKey,
+  persistentOperationKey,
+  requestJson
+} from "@/lib/http/client-api";
 
 type CompiledTheme = ThemeDefinition["meta"] &
   Pick<ThemeDefinition, "apiVersion" | "capabilities"> & {
@@ -125,35 +130,52 @@ export function ThemeManager({
     resetFeedback();
     setPendingTarget(action === "rollback" ? "rollback" : themeId ?? "activate");
     startTransition(async () => {
-      try {
-        const response = await fetch("/api/admin/themes", {
+      const payload = JSON.stringify({
+        action,
+        themeId: action === "rollback" ? previousTheme?.id : themeId,
+        expectedActiveTheme: activeTheme
+      });
+      const storageKey = "manjyun:theme-mutation";
+      const idempotencyKey = persistentOperationKey(
+        window.sessionStorage,
+        storageKey,
+        payload
+      );
+      const result = await requestJson<{
+        ok: true;
+        action: "activate" | "rollback";
+        activeTheme: string;
+        previousTheme: string | null;
+      }>(
+        "/api/admin/themes",
+        {
           method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ action, themeId })
-        });
-        const data = (await response.json()) as {
-          ok?: boolean;
-          error?: string;
-          activeTheme?: string;
-        };
-        if (!response.ok || !data.ok) {
-          setMessageKind("error");
-          setMessage(data.error ?? "主题切换失败");
-          return;
-        }
-        setMessageKind("success");
-        setMessage(
-          action === "rollback"
-            ? `已回退到 ${data.activeTheme ?? "上一个主题"}。`
-            : `已激活 ${data.activeTheme ?? themeId ?? "所选主题"}。`
-        );
-        router.refresh();
-      } catch {
+          headers: {
+            "content-type": "application/json",
+            "Idempotency-Key": idempotencyKey
+          },
+          body: payload
+        },
+        { fallbackMessage: "主题切换失败" }
+      );
+      if (!result.ok) {
         setMessageKind("error");
-        setMessage("主题切换请求失败，请稍后重试。");
-      } finally {
+        setMessage(result.message);
+        if (result.code === "IDEMPOTENCY_CONFLICT") {
+          clearPersistentOperationKey(window.sessionStorage, storageKey);
+        }
         setPendingTarget("");
+        return;
       }
+      clearPersistentOperationKey(window.sessionStorage, storageKey);
+      setMessageKind("success");
+      setMessage(
+        action === "rollback"
+          ? `已回退到 ${result.data.activeTheme}。`
+          : `已激活 ${result.data.activeTheme}。`
+      );
+      setPendingTarget("");
+      router.refresh();
     });
   }
 
@@ -184,6 +206,7 @@ export function ThemeManager({
             ref={inputRef}
             className="visually-hidden"
             type="file"
+            aria-label="选择要审查的主题 manifest 文件"
             accept="application/json,.json"
             onChange={(event) => {
               const file = event.target.files?.[0];

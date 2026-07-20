@@ -99,8 +99,266 @@ test("markdown renderer supports headings and custom cards", () => {
     { id: "section-3", level: 2, text: "Section" }
   ]);
   assert.match(rendered.html, /<h3 id="section-2">Section<\/h3>/);
-  assert.match(rendered.html, /mj-audio-card/);
+  assert.match(
+    rendered.html,
+    /<div class="mj-audio-meta"><span>audio<\/span><strong>Song<\/strong><\/div>/
+  );
   assert.match(rendered.html, /mj-bookmark-card/);
+});
+
+test("markdown custom cards never expand inside fenced or inline code", () => {
+  const rendered = renderMarkdown([
+    "```md",
+    '[audio:Hidden](/uploads/hidden.mp3 "inside fence")',
+    '[bookmark:Hidden](https://example.com "inside fence")',
+    "::callout Hidden",
+    "inside fence",
+    "::",
+    "[code]const hidden = true;[/code]",
+    "```",
+    "",
+    "Inline `[audio:Inline](/uploads/inline.mp3)` and `[code]inline[/code]`.",
+    "",
+    "~~~text",
+    "[bookmark:Tilde](https://example.com)",
+    "~~~",
+    "",
+    "    [code]indented[/code]",
+    "",
+    "<pre><code>[code]raw html[/code]</code></pre>",
+    "",
+    "- nested fence",
+    "  ```md",
+    "  [code]inside list fence[/code]",
+    "  ```"
+  ].join("\n"));
+
+  assert.doesNotMatch(rendered.html, /mj-(?:audio|bookmark|callout|code)-/);
+  assert.match(
+    rendered.html,
+    /\[audio:Hidden\]\(\/uploads\/hidden\.mp3 "inside fence"\)/
+  );
+  assert.match(
+    rendered.html,
+    /<code>\[audio:Inline\]\(\/uploads\/inline\.mp3\)<\/code>/
+  );
+  assert.match(
+    rendered.html,
+    /\[bookmark:Tilde\]\(https:\/\/example\.com\)/
+  );
+  assert.match(rendered.html, /\[code\]indented\[\/code\]/);
+  assert.match(rendered.html, /\[code\]raw html\[\/code\]/);
+  assert.match(rendered.html, /\[code\]inside list fence\[\/code\]/);
+});
+
+test("heading ids and toc labels come from rendered plain text", () => {
+  const rendered = renderMarkdown([
+    "## **API** [Guide](/docs) `v2` &amp; <em>stable</em>",
+    "",
+    "## API Guide v2 &amp; stable"
+  ].join("\n"));
+
+  assert.deepEqual(rendered.toc, [
+    {
+      id: "api-guide-v2-stable",
+      level: 2,
+      text: "API Guide v2 & stable"
+    },
+    {
+      id: "api-guide-v2-stable-2",
+      level: 2,
+      text: "API Guide v2 & stable"
+    }
+  ]);
+  assert.match(
+    rendered.html,
+    /<h2 id="api-guide-v2-stable"><strong>API<\/strong> <a href="\/docs">Guide<\/a> <code>v2<\/code> &amp; <em>stable<\/em><\/h2>/
+  );
+});
+
+test("sanitization preserves the documented rich-content DOM classes", () => {
+  const rendered = renderMarkdown([
+    "[code:ts]const value = 1;[/code]",
+    "",
+    '[audio:Signal](/uploads/signal.mp3 "Recorded locally")',
+    "",
+    '[bookmark:Docs](https://example.com "Reference")',
+    "",
+    "::callout Notice",
+    "Read this first.",
+    "::",
+    "",
+    "| Name | Value |",
+    "| --- | --- |",
+    "| status | ready |",
+    "",
+    '<div class="rift-scanlines">must not inherit a theme utility class</div>',
+    '<aside class="rift-scanlines">must not inherit an aside utility class</aside>',
+    '<p class="rift-scanlines"><span class="rift-scanlines">plain text</span></p>',
+    '<strong class="rift-scanlines">strong text</strong>',
+    '<small class="rift-scanlines">small text</small>',
+    '<figcaption class="rift-scanlines">caption</figcaption>',
+    '<a class="rift-scanlines" href="data:text/html,unsafe">unsafe link</a>',
+    '<img class="rift-scanlines" alt="inline image" src="data:image/png;base64,AA">'
+  ].join("\n"));
+
+  assert.match(rendered.html, /<pre class="mj-code-block">/);
+  assert.match(rendered.html, /<figure class="kg-card mj-audio-card">/);
+  assert.match(rendered.html, /<div class="mj-audio-meta">/);
+  assert.match(rendered.html, /<a class="kg-card mj-bookmark-card"/);
+  assert.match(rendered.html, /<aside class="kg-card mj-callout-card">/);
+  assert.match(rendered.html, /<div class="table-scroll"><table>/);
+  assert.doesNotMatch(rendered.html, /class="rift-scanlines"/);
+  assert.doesNotMatch(rendered.html, /href="data:/);
+  assert.match(rendered.html, /src="data:image\/png;base64,AA"/);
+});
+
+test("custom callouts render native inline and fenced code without leaking into the toc", () => {
+  const rendered = renderMarkdown([
+    "::callout Deploy safely",
+    "Run `npm test` before deploying.",
+    "",
+    "[code:ts]const nested = true;[/code]",
+    "",
+    "```sh",
+    "npm run check",
+    "```",
+    "::"
+  ].join("\n"));
+
+  assert.match(
+    rendered.html,
+    /<aside class="kg-card mj-callout-card"><strong>Deploy safely<\/strong>/
+  );
+  assert.match(rendered.html, /Run <code>npm test<\/code> before deploying\./);
+  assert.match(
+    rendered.html,
+    /<pre class="mj-code-block"><code class="language-ts">const nested = true;<\/code><\/pre>/
+  );
+  assert.match(
+    rendered.html,
+    /<pre><code class="language-sh">npm run check\n<\/code><\/pre>/
+  );
+  assert.deepEqual(rendered.toc, []);
+});
+
+test("callout boundaries ignore closing markers inside fenced code", () => {
+  const rendered = renderMarkdown([
+    "::callout Colon token",
+    "```text",
+    "::",
+    "```",
+    "After fence.",
+    "::"
+  ].join("\n"));
+
+  assert.match(rendered.html, /<code class="language-text">::\n<\/code>/);
+  assert.match(rendered.html, /After fence\./);
+  assert.equal(
+    (rendered.html.match(/mj-callout-card/g) ?? []).length,
+    1
+  );
+});
+
+test("callout boundaries understand list and blockquote fenced code", () => {
+  const rendered = renderMarkdown([
+    "::callout Container fences",
+    "- ```text",
+    "  ::",
+    "  ```",
+    "> ```text",
+    "> ::",
+    "> ```",
+    "After container fences.",
+    "::"
+  ].join("\n"));
+
+  assert.equal(
+    (rendered.html.match(/<code class="language-text">::\n<\/code>/g) ?? [])
+      .length,
+    2
+  );
+  assert.match(rendered.html, /After container fences\./);
+  assert.equal(
+    (rendered.html.match(/mj-callout-card/g) ?? []).length,
+    1
+  );
+});
+
+test("callout boundaries track ordered-list content indentation", () => {
+  const rendered = renderMarkdown([
+    "::callout Ordered fence",
+    "10. ```text",
+    "    ::",
+    "    ```",
+    "After ordered fence.",
+    "::"
+  ].join("\n"));
+
+  assert.match(rendered.html, /<ol>/);
+  assert.match(rendered.html, /<code class="language-text">::\n<\/code>/);
+  assert.match(rendered.html, /After ordered fence\./);
+  assert.equal(
+    (rendered.html.match(/mj-callout-card/g) ?? []).length,
+    1
+  );
+});
+
+test("callout boundaries ignore closing markers inside compatibility code", () => {
+  const rendered = renderMarkdown([
+    "::callout Compat code",
+    "[code]",
+    "::",
+    "[/code]",
+    "After code.",
+    "::"
+  ].join("\n"));
+
+  assert.match(
+    rendered.html,
+    /<pre class="mj-code-block"><code>::<\/code><\/pre>/
+  );
+  assert.match(rendered.html, /After code\./);
+  assert.equal(
+    (rendered.html.match(/mj-callout-card/g) ?? []).length,
+    1
+  );
+});
+
+test("ordinary blockquotes preserve document reference links", () => {
+  const rendered = renderMarkdown([
+    '[docs]: https://example.com/path "Docs"',
+    "",
+    "> Read [docs] and ![logo][docs]."
+  ].join("\n"));
+
+  assert.match(
+    rendered.html,
+    /<blockquote><p>Read <a href="https:\/\/example\.com\/path"/
+  );
+  assert.match(
+    rendered.html,
+    /<img src="https:\/\/example\.com\/path" alt="logo" title="Docs"/
+  );
+});
+
+test("custom callouts inherit document references without adding headings to the toc", () => {
+  const rendered = renderMarkdown([
+    '[docs]: https://example.com/docs "Docs"',
+    "",
+    "::callout Reference",
+    "## Internal heading",
+    "",
+    "See [docs].",
+    "::"
+  ].join("\n"));
+
+  assert.match(rendered.html, /<h2>Internal heading<\/h2>/);
+  assert.match(
+    rendered.html,
+    /See <a href="https:\/\/example\.com\/docs"[^>]*>docs<\/a>/
+  );
+  assert.deepEqual(rendered.toc, []);
 });
 
 test("entry table of contents includes h2 headings only", () => {
@@ -134,6 +392,17 @@ Body`, "Same title");
     level: 2,
     text: "Another section"
   });
+});
+
+test("encoded leading titles are removed against their plain-text entry title", () => {
+  const rendered = renderEntryMarkdown(
+    "# Tom &amp; Jerry\n\nBody",
+    "Tom & Jerry"
+  );
+
+  assert.doesNotMatch(rendered.html, /<h[12][ >]/);
+  assert.match(rendered.html, /<p>Body<\/p>/);
+  assert.deepEqual(rendered.toc, []);
 });
 
 test("markdown renderer supports compatible code blocks and task lists", () => {

@@ -1,6 +1,6 @@
 import { absoluteSiteUrl } from "@/lib/seo/metadata";
 import { contentHref } from "@/lib/content/content-types";
-import type { PostRecord, SiteSettings } from "@/types/blog";
+import type { PublicFeedItem, SiteSettings } from "@/types/blog";
 
 export function escapeXml(value: string) {
   return value
@@ -18,7 +18,7 @@ function rfc822(value: string | Date) {
 
 export function buildRssFeed(input: {
   settings: SiteSettings;
-  posts: PostRecord[];
+  posts: PublicFeedItem[];
   now?: Date;
 }) {
   const { settings } = input;

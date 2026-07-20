@@ -112,6 +112,14 @@ export type ThemeHomeViewModel = ThemePageContextViewModel & {
   modules: ThemeHomeModuleViewModel[];
 };
 
+export type ThemeCollectionPaginationViewModel = {
+  label: string;
+  currentPage: number;
+  totalPages: number;
+  previous: ThemeLinkViewModel | null;
+  next: ThemeLinkViewModel | null;
+};
+
 export type ThemeCollectionViewModel = ThemePageContextViewModel & {
   view: "collection";
   title: string;
@@ -123,6 +131,7 @@ export type ThemeCollectionViewModel = ThemePageContextViewModel & {
   entries: ThemeEntrySummaryViewModel[];
   emptyMessage: string;
   backLink: ThemeLinkViewModel | null;
+  pagination?: ThemeCollectionPaginationViewModel | null;
 };
 
 export type ThemeRenderedContentViewModel = {

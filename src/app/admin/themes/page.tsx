@@ -25,7 +25,6 @@ export default async function AdminThemesPage() {
     <AdminFrame
       title="主题"
       subtitle="v1 以代码主题包扩展，后台负责切换和查看元信息。"
-      activeNav="/admin/themes"
       breadcrumbs={[
         { label: "概览", href: "/admin" },
         { label: "主题" }
