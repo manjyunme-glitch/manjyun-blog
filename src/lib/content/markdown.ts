@@ -1,6 +1,7 @@
 import { Marked, Parser, Renderer } from "marked";
 import type { Token, TokenizerAndRendererExtension, Tokens } from "marked";
 import sanitizeHtml from "sanitize-html";
+import { inferCodeLanguage } from "@/lib/content/code-language";
 import { slugify } from "@/lib/content/slug";
 import type { RenderedMarkdown } from "@/types/blog";
 
@@ -10,8 +11,6 @@ type InlineMarkdownToken = {
   tokens?: InlineMarkdownToken[];
 };
 
-let calloutBodyMarkdown: Marked;
-
 function escapeAttribute(value: string) {
   return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
 }
@@ -20,17 +19,10 @@ function escapeHtml(value: string) {
   return escapeAttribute(value).replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-function inferCodeLanguage(language: string, body: string) {
-  const explicit = language.trim().toLowerCase().replace(/[^a-z0-9_-]/g, "");
-  if (explicit) return explicit;
-  const trimmed = body.trim();
-  if (
-    (trimmed.startsWith("{") && trimmed.endsWith("}")) ||
-    (trimmed.startsWith("[") && trimmed.endsWith("]"))
-  ) {
-    return "json";
-  }
-  return "";
+function stripRawInputTags(value: string) {
+  return value
+    .replace(/<input\b(?:[^>"']|"[^"]*"|'[^']*')*>/gi, "")
+    .replace(/<\/input\s*>/gi, "");
 }
 
 function normalizeCodeBlock(body: string) {
@@ -65,6 +57,92 @@ function inlineTokensToPlainText(tokens: InlineMarkdownToken[]): string {
   return decodeHeadingEntities(inlineTokensToEncodedText(tokens))
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function decodeCardTitle(value: string) {
+  return value.replace(/\\([\\\]])/g, "$1");
+}
+
+function decodeCardUrl(value: string) {
+  return value.replace(/\\([\\()<>])/g, "$1");
+}
+
+function tokenizeLinkedCardBlock(src: string, kind: "audio" | "bookmark") {
+  const opening = new RegExp(
+    `^ {0,3}\\[${kind}:((?:\\\\.|[^\\]\\\\\\r\\n])+)\\]\\(`
+  ).exec(src);
+  if (!opening) return null;
+
+  let cursor = opening[0].length;
+  while (src[cursor] === " " || src[cursor] === "\t") cursor += 1;
+
+  let url = "";
+  if (src[cursor] === "<") {
+    const end = src.indexOf(">", cursor + 1);
+    if (end === -1 || /[\r\n]/.test(src.slice(cursor + 1, end))) return null;
+    url = src.slice(cursor + 1, end);
+    cursor = end + 1;
+  } else {
+    const start = cursor;
+    let depth = 0;
+    while (cursor < src.length) {
+      const character = src[cursor];
+      if (character === "\r" || character === "\n") return null;
+      if (character === "\\") {
+        cursor += Math.min(2, src.length - cursor);
+        continue;
+      }
+      if (character === "(") {
+        depth += 1;
+        cursor += 1;
+        continue;
+      }
+      if (character === ")") {
+        if (depth === 0) break;
+        depth -= 1;
+        cursor += 1;
+        continue;
+      }
+      if ((character === " " || character === "\t") && depth === 0) break;
+      cursor += 1;
+    }
+    url = src.slice(start, cursor);
+  }
+  if (!url) return null;
+
+  while (src[cursor] === " " || src[cursor] === "\t") cursor += 1;
+  let description = "";
+  if (src[cursor] === '"') {
+    cursor += 1;
+    const start = cursor;
+    while (cursor < src.length) {
+      if (src[cursor] === "\r" || src[cursor] === "\n") return null;
+      if (src[cursor] === "\\") {
+        cursor += Math.min(2, src.length - cursor);
+        continue;
+      }
+      if (src[cursor] === '"') break;
+      cursor += 1;
+    }
+    if (src[cursor] !== '"') return null;
+    description = src.slice(start, cursor).replace(/\\"/g, '"');
+    cursor += 1;
+    while (src[cursor] === " " || src[cursor] === "\t") cursor += 1;
+  }
+
+  if (src[cursor] !== ")") return null;
+  cursor += 1;
+  while (src[cursor] === " " || src[cursor] === "\t") cursor += 1;
+  if (src[cursor] === "\r" && src[cursor + 1] === "\n") cursor += 2;
+  else if (src[cursor] === "\n") cursor += 1;
+  else if (cursor !== src.length) return null;
+
+  return {
+    raw: src.slice(0, cursor),
+    title: opening[1],
+    url: decodeCardUrl(url),
+    description
+  };
 }
 
 type CustomCardToken = Tokens.Generic & {
@@ -196,7 +274,7 @@ function tokenizeCalloutBlock(src: string) {
     }
 
     const compatibilityCodeOpening =
-      /^ {0,3}\[code(?::[a-z0-9_-]+)?\]/i.exec(openingLine.line);
+      /^ {0,3}\[code(?::[^\]\r\n]+)?\]/i.exec(openingLine.line);
     if (
       compatibilityCodeOpening &&
       !/\[\/code\]/i.test(
@@ -227,13 +305,19 @@ function tokenizeCalloutBlock(src: string) {
  * That keeps these compatibility cards out of inline/fenced/indented code and
  * raw HTML code containers without maintaining a second Markdown lexer.
  */
-const customCardExtensions: TokenizerAndRendererExtension[] = [
+function createCustomCardExtensions(
+  renderCalloutBody: (tokens: Token[]) => string
+): TokenizerAndRendererExtension[] {
+  return [
   {
     name: "mjCodeBlock",
     level: "block",
+    start(src) {
+      return /\n {0,3}\[code(?::[^\]\r\n]+)?\]/i.exec(src)?.index;
+    },
     tokenizer(src) {
       const match =
-        /^ {0,3}\[code(?::([a-z0-9_-]+))?\]([\s\S]*?)\[\/code\][\t ]*(?:\r?\n|$)/i.exec(
+        /^ {0,3}\[code(?::([^\]\r\n]+))?\]([\s\S]*?)\[\/code\][\t ]*(?:\r?\n|$)/i.exec(
           src
         );
       if (!match) return;
@@ -257,18 +341,15 @@ const customCardExtensions: TokenizerAndRendererExtension[] = [
   {
     name: "mjAudioCard",
     level: "block",
+    start(src) {
+      return /\n {0,3}\[audio:(?:\\.|[^\]\\\r\n])+\]\(/.exec(src)?.index;
+    },
     tokenizer(src) {
-      const match =
-        /^ {0,3}\[audio:([^\]\r\n]+)\]\(([^)\s]+)(?:[\t ]+"([^"\r\n]+)")?\)[\t ]*(?:\r?\n|$)/.exec(
-          src
-        );
+      const match = tokenizeLinkedCardBlock(src, "audio");
       if (!match) return;
       return {
         type: "mjAudioCard",
-        raw: match[0],
-        title: match[1],
-        url: match[2],
-        description: match[3] ?? ""
+        ...match
       };
     },
     renderer(token) {
@@ -281,7 +362,7 @@ const customCardExtensions: TokenizerAndRendererExtension[] = [
         ? `<figcaption>${escapeHtml(description.trim())}</figcaption>`
         : "";
       return `<figure class="kg-card mj-audio-card"><div class="mj-audio-meta"><span>audio</span><strong>${escapeHtml(
-        title.trim()
+        decodeCardTitle(title.trim())
       )}</strong></div><audio controls src="${escapeAttribute(
         url
       )}"></audio>${safeCaption}</figure>`;
@@ -290,18 +371,15 @@ const customCardExtensions: TokenizerAndRendererExtension[] = [
   {
     name: "mjBookmarkCard",
     level: "block",
+    start(src) {
+      return /\n {0,3}\[bookmark:(?:\\.|[^\]\\\r\n])+\]\(/.exec(src)?.index;
+    },
     tokenizer(src) {
-      const match =
-        /^ {0,3}\[bookmark:([^\]\r\n]+)\]\(([^)\s]+)(?:[\t ]+"([^"\r\n]+)")?\)[\t ]*(?:\r?\n|$)/.exec(
-          src
-        );
+      const match = tokenizeLinkedCardBlock(src, "bookmark");
       if (!match) return;
       return {
         type: "mjBookmarkCard",
-        raw: match[0],
-        title: match[1],
-        url: match[2],
-        description: match[3] ?? ""
+        ...match
       };
     },
     renderer(token) {
@@ -311,17 +389,21 @@ const customCardExtensions: TokenizerAndRendererExtension[] = [
         description = ""
       } = token as CustomCardToken;
       const safeUrl = escapeAttribute(url);
+      const safeUrlText = escapeHtml(url);
       const safeDescription = description
         ? `<p>${escapeHtml(description.trim())}</p>`
         : "";
       return `<a class="kg-card mj-bookmark-card" href="${safeUrl}"><span>bookmark</span><strong>${escapeHtml(
-        title.trim()
-      )}</strong>${safeDescription}<small>${safeUrl}</small></a>`;
+        decodeCardTitle(title.trim())
+      )}</strong>${safeDescription}<small>${safeUrlText}</small></a>`;
     }
   },
   {
     name: "mjCalloutCard",
     level: "block",
+    start(src) {
+      return /\n {0,3}::callout[\t ]+[^\r\n]+(?:\r?\n|$)/.exec(src)?.index;
+    },
     childTokens: ["tokens"],
     tokenizer(src) {
       const match = tokenizeCalloutBlock(src);
@@ -336,18 +418,14 @@ const customCardExtensions: TokenizerAndRendererExtension[] = [
     },
     renderer(token) {
       const { title = "", tokens = [] } = token as CustomCardToken;
-      const renderedBody = calloutBodyMarkdown.parser(tokens);
+      const renderedBody = renderCalloutBody(tokens);
       return `<aside class="kg-card mj-callout-card"><strong>${escapeHtml(
         title.trim()
       )}</strong>${renderedBody}</aside>`;
     }
   }
-];
-
-calloutBodyMarkdown = new Marked(
-  { extensions: customCardExtensions },
-  { gfm: true, breaks: false }
-);
+  ];
+}
 
 export function renderMarkdown(
   markdown: string,
@@ -356,10 +434,14 @@ export function renderMarkdown(
   const toc: RenderedMarkdown["toc"] = [];
   const headingIds = new Set<string>();
   const renderer = new Renderer();
+  const nestedRenderer = new Renderer();
   const inlineParser = new Parser();
 
+  renderer.html = ({ text }) => stripRawInputTags(text);
+  nestedRenderer.html = renderer.html;
+
   renderer.heading = ({ tokens, depth }) => {
-    const renderedText = inlineParser.parseInline(tokens);
+    const renderedText = stripRawInputTags(inlineParser.parseInline(tokens));
     const text =
       inlineTokensToPlainText(tokens as InlineMarkdownToken[]) || "章节";
     const renderedDepth = options.demoteH1 && depth === 1 ? 2 : depth;
@@ -380,21 +462,56 @@ export function renderMarkdown(
     return `<h${renderedDepth}>${renderedText}</h${renderedDepth}>`;
   };
 
+  nestedRenderer.heading = ({ tokens, depth }) => {
+    const renderedText = stripRawInputTags(inlineParser.parseInline(tokens));
+    const renderedDepth = options.demoteH1 && depth === 1 ? 2 : depth;
+    return `<h${renderedDepth}>${renderedText}</h${renderedDepth}>`;
+  };
+
+  renderer.code = ({ text: code, lang }) => {
+    // Marked has already removed the fence delimiters. Any remaining leading
+    // or trailing newline belongs to the code sample and must be preserved.
+    const language = inferCodeLanguage(lang ?? "", code);
+    const className = language ? ` class="language-${language}"` : "";
+    return `<pre class="mj-code-block"><code${className}>${escapeHtml(
+      code
+    )}</code></pre>`;
+  };
+  nestedRenderer.code = renderer.code;
+
   renderer.blockquote = function ({ tokens }) {
     const body = this.parser.parse(tokens);
     const callout = body.match(
-      /^<p>\[!(NOTE|TIP|WARN|INFO)\](?:[\t ]+|\r?\n)?/i
+      /^<p>\[!(NOTE|TIP|INFO|WARN|WARNING|IMPORTANT|CAUTION)\](?:[\t ]+|\r?\n)?/i
     );
     if (callout) {
-      const label = callout[1].toLowerCase();
+      const sourceLabel = callout[1].toLowerCase();
+      const label = sourceLabel === "warning" ? "warn" : sourceLabel;
       const content = body
         .replace(callout[0], "<p>")
         .replace(/^<p><\/p>\s*/, "");
-      return `<aside class="kg-card mj-callout-card ${label}"><strong>${label}</strong>${content}</aside>`;
+      return `<aside class="kg-card mj-callout-card ${label}"><strong>${sourceLabel}</strong>${content}</aside>`;
     }
     return `<blockquote>${body}</blockquote>`;
   };
+  nestedRenderer.blockquote = renderer.blockquote;
 
+  let nestedMarkdownParser: Marked;
+  const nestedExtensions = createCustomCardExtensions((tokens) =>
+    nestedMarkdownParser.parser(tokens)
+  );
+  nestedMarkdownParser = new Marked(
+    { extensions: nestedExtensions },
+    {
+      gfm: true,
+      breaks: false,
+      renderer: nestedRenderer
+    }
+  );
+
+  const customCardExtensions = createCustomCardExtensions((tokens) =>
+    nestedMarkdownParser.parser(tokens)
+  );
   const markdownParser = new Marked(
     {
       extensions: customCardExtensions
@@ -411,6 +528,7 @@ export function renderMarkdown(
   }) as string;
   const sanitized = sanitizeHtml(html, {
     allowedTags: sanitizeHtml.defaults.allowedTags.concat([
+      "del",
       "img",
       "figure",
       "figcaption",
@@ -422,10 +540,13 @@ export function renderMarkdown(
       "input"
     ]),
     allowedAttributes: {
-      a: ["href", "name", "target", "rel", "class"],
+      a: ["href", "name", "target", "rel", "class", "title"],
       img: ["src", "alt", "title", "loading"],
       h2: ["id"],
       h3: ["id"],
+      ol: ["start"],
+      th: ["align"],
+      td: ["align"],
       code: ["class"],
       pre: ["class"],
       div: ["class"],
@@ -446,7 +567,16 @@ export function renderMarkdown(
       pre: ["mj-code-block"],
       div: ["mj-audio-meta"],
       figure: ["kg-card", "mj-audio-card"],
-      aside: ["kg-card", "mj-callout-card", "note", "tip", "warn", "info"]
+      aside: [
+        "kg-card",
+        "mj-callout-card",
+        "note",
+        "tip",
+        "warn",
+        "info",
+        "important",
+        "caution"
+      ]
     },
     allowedSchemes: ["http", "https", "mailto", "tel"],
     allowedSchemesByTag: {
@@ -457,17 +587,62 @@ export function renderMarkdown(
     transformTags: {
       a: (_tagName, attribs) => {
         const href = attribs.href ?? "";
-        const isExternal = /^https?:\/\//.test(href);
+        const isExternal = /^(?:https?:)?\/\//i.test(href);
+        const targetsBlank = attribs.target?.trim().toLowerCase() === "_blank";
         return {
           tagName: "a",
           attribs: {
             ...attribs,
             ...(isExternal
               ? { target: "_blank", rel: "noopener noreferrer" }
-              : {})
+              : targetsBlank
+                ? { target: "_blank", rel: "noopener noreferrer" }
+                : {})
           }
         };
-      }
+      },
+      ol: (_tagName, attribs) => {
+        const next = { ...attribs };
+        if (next.start && !/^-?\d{1,9}$/.test(next.start)) {
+          delete next.start;
+        }
+        return { tagName: "ol", attribs: next };
+      },
+      th: (_tagName, attribs) => {
+        const next = { ...attribs };
+        if (
+          next.align &&
+          !["left", "center", "right"].includes(next.align.toLowerCase())
+        ) {
+          delete next.align;
+        }
+        return { tagName: "th", attribs: next };
+      },
+      td: (_tagName, attribs) => {
+        const next = { ...attribs };
+        if (
+          next.align &&
+          !["left", "center", "right"].includes(next.align.toLowerCase())
+        ) {
+          delete next.align;
+        }
+        return { tagName: "td", attribs: next };
+      },
+      ...(options.demoteH1
+        ? {
+            h1: () => ({
+              tagName: "h2",
+              attribs: {}
+            })
+          }
+        : {})
+    },
+    exclusiveFilter(frame) {
+      if (frame.tag !== "input") return false;
+      return !(
+        frame.attribs.type?.toLowerCase() === "checkbox" &&
+        Object.hasOwn(frame.attribs, "disabled")
+      );
     }
   });
   const safeHtml = sanitized

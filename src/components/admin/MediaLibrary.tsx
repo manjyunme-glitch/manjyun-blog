@@ -8,6 +8,7 @@ import {
   createIdempotencyKey,
   requestJson
 } from "@/lib/http/client-api";
+import { mediaToMarkdown } from "@/lib/admin/media-markdown";
 import type { MediaReconciliationReport } from "@/lib/media/reconcile";
 
 type MediaReference = {
@@ -56,11 +57,7 @@ export function MediaLibrary({ media }: { media: MediaRecord[] }) {
   async function copyMedia(item: MediaRecord, format: "url" | "markdown") {
     const value = format === "url"
       ? item.url
-      : item.mime.startsWith("image/")
-        ? `![${item.originalName}](${item.url})`
-        : item.mime.startsWith("audio/")
-          ? `[audio:${item.originalName}](${item.url})`
-          : `[${item.originalName}](${item.url})`;
+      : mediaToMarkdown(item);
     try {
       await navigator.clipboard.writeText(value);
       setMessageKind("success");

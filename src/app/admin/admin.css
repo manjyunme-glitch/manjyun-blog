@@ -189,6 +189,12 @@
     text-decoration-color: var(--accent);
   }
 
+  .gh-content del {
+    color: var(--text-soft);
+    text-decoration-color: var(--red);
+    text-decoration-thickness: 1.5px;
+  }
+
   .gh-content code {
     padding: 0.15em 0.4em;
     border: 1px solid var(--border);
@@ -237,6 +243,11 @@
     accent-color: var(--accent);
   }
 
+  .gh-content ul:has(> li > input[type="checkbox"]) {
+    padding-left: 0;
+    list-style: none;
+  }
+
   .gh-content blockquote {
     margin-inline: 0;
     padding: 0.8rem 1.1rem;
@@ -270,6 +281,18 @@
   .gh-content td {
     padding: 0.6rem 0.8rem;
     border: 1px solid var(--border);
+    text-align: left;
+  }
+
+  .gh-content :is(th, td)[align="center"] {
+    text-align: center;
+  }
+
+  .gh-content :is(th, td)[align="right"] {
+    text-align: right;
+  }
+
+  .gh-content :is(th, td)[align="left"] {
     text-align: left;
   }
 
@@ -323,6 +346,20 @@
   .mj-callout-card p {
     margin: 0.35rem 0 0;
     color: var(--text-soft);
+  }
+
+  .mj-callout-card.important {
+    border-left: 3px solid var(--accent);
+    background: color-mix(in srgb, var(--accent), transparent 92%);
+  }
+
+  .mj-callout-card:is(.warn, .caution) {
+    border-left: 3px solid var(--red);
+    background: color-mix(in srgb, var(--red), transparent 92%);
+  }
+
+  .mj-callout-card:is(.warn, .caution) > strong {
+    color: var(--red);
   }
 
 
@@ -2800,6 +2837,99 @@
     min-width: 0;
   }
 
+  .markdown-format-toolbar {
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 0.42rem;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    padding: 0.5rem 0.6rem;
+    border-bottom: 1px solid var(--admin-border);
+    background: color-mix(in srgb, var(--admin-surface), var(--admin-bg) 24%);
+    scrollbar-width: thin;
+  }
+
+  .markdown-tool-group {
+    display: inline-flex;
+    flex: 0 0 auto;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 0.28rem;
+    padding-right: 0.42rem;
+    border-right: 1px solid var(--admin-border);
+  }
+
+  .markdown-tool-group:last-child {
+    padding-right: 0;
+    border-right: 0;
+  }
+
+  .markdown-tool-button,
+  .markdown-language-select {
+    min-height: 30px;
+    border: 1px solid var(--admin-border);
+    border-radius: 5px;
+    background: var(--admin-surface);
+    color: var(--admin-text-soft);
+    font-family: var(--mono);
+    font-size: 0.68rem;
+  }
+
+  .markdown-tool-button {
+    padding: 0.34rem 0.5rem;
+    cursor: pointer;
+  }
+
+  .markdown-tool-button:hover:not(:disabled),
+  .markdown-tool-button:focus-visible,
+  .markdown-language-select:focus-visible {
+    border-color: var(--admin-accent);
+    color: var(--admin-accent);
+    outline: 0;
+  }
+
+  .markdown-tool-button:disabled,
+  .markdown-language-select:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+
+  .markdown-code-tools label {
+    color: var(--admin-muted);
+    font-family: var(--mono);
+    font-size: 0.65rem;
+  }
+
+  .markdown-language-select {
+    max-width: 128px;
+    padding: 0.25rem 1.55rem 0.25rem 0.45rem;
+  }
+
+  .chip.draft-storage-error {
+    border-color: var(--admin-red);
+    color: var(--admin-red);
+  }
+
+  .chip.draft-storage-saved {
+    border-color: color-mix(in srgb, var(--admin-green), transparent 55%);
+    color: var(--admin-green);
+  }
+
+  @media (max-width: 1360px) {
+    .editor-layout {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .editor-side {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .editor-side .revision-card {
+      grid-column: 1 / -1;
+    }
+  }
+
   .editor-workspace .markdown-editor,
   .editor-workspace .preview-pane {
     min-height: 66vh;
@@ -2953,6 +3083,15 @@
 
     .editor-workspace {
       grid-template-columns: minmax(0, 1fr);
+    }
+
+    .editor-side {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .markdown-tool-button,
+    .markdown-language-select {
+      min-height: 40px;
     }
 
     .editor-view-split .editor-workspace .markdown-editor,

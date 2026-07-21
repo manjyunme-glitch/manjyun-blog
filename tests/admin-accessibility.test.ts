@@ -31,6 +31,7 @@ test("primary editor and settings controls have programmatic accessible names", 
   for (const id of [
     "editor-title",
     "editor-markdown",
+    "editor-code-language",
     "editor-slug",
     "editor-type",
     "post-tags",
@@ -46,6 +47,12 @@ test("primary editor and settings controls have programmatic accessible names", 
     );
     assert.ok(editor.includes(`id="${id}"`), `editor must render #${id}`);
   }
+  assert.match(editor, /role="toolbar"/);
+  assert.match(editor, /aria-label="Markdown 格式工具栏"/);
+  assert.match(editor, /role="group"/);
+  assert.match(editor, /aria-describedby="editor-markdown-keyboard-help"/);
+  assert.match(editor, /event\.key === "Escape"/);
+  assert.match(editor, /tabExitArmedRef/);
 
   const settings = source("../src/components/admin/SettingsForm.tsx");
   for (const id of [

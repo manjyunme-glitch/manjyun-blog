@@ -369,10 +369,184 @@ test("public collections paginate and canonicalize real production routes", asyn
   ).toBeVisible();
 });
 
+test("new post save races preserve newer edits and reach the canonical editor URL", async ({
+  page
+}) => {
+  await login(page);
+  await page.goto("/admin/posts/new");
+
+  await page.getByLabel("标题", { exact: true }).fill("E2E raced draft");
+  const slugInput = page.getByLabel("Slug", { exact: true });
+  await slugInput.fill("e2e-raced-draft");
+  const editor = page.locator(".markdown-editor");
+  await editor.evaluate((element) => {
+    element.focus();
+    element.setSelectionRange(element.value.length, element.value.length);
+  });
+  await editor.press("Escape");
+  await slugInput.click();
+  await editor.evaluate((element) => {
+    element.focus();
+    element.setSelectionRange(element.value.length, element.value.length);
+  });
+  const beforeTabIndent = await editor.inputValue();
+  await editor.press("Tab");
+  await expect(editor).toBeFocused();
+  await expect(editor).toHaveValue(`${beforeTabIndent}  `);
+  await editor.press("Escape");
+  await editor.press("Tab");
+  await expect(slugInput).toBeFocused();
+  await editor.fill("## Initial\n\nSaved request body.");
+
+  let releaseCreate;
+  let markCreateStarted;
+  const createGate = new Promise((resolve) => {
+    releaseCreate = resolve;
+  });
+  const createStarted = new Promise((resolve) => {
+    markCreateStarted = resolve;
+  });
+  let createRequests = 0;
+  let updateRequests = 0;
+  await page.route("**/api/admin/posts**", async (route) => {
+    const method = route.request().method();
+    if (method === "POST") {
+      createRequests += 1;
+      if (createRequests === 1) {
+        markCreateStarted();
+        await createGate;
+      }
+    } else if (method === "PUT") {
+      updateRequests += 1;
+    }
+    await route.continue();
+  });
+
+  await page.getByRole("button", { name: "保存草稿", exact: true }).click();
+  await createStarted;
+  await editor.evaluate((element) => {
+    element.focus();
+    element.setSelectionRange(element.value.length, element.value.length);
+  });
+  await editor.type("\n\nTyped while the create request was pending.");
+  releaseCreate();
+
+  await expect(
+    page.getByText("已保存请求发出时的版本", { exact: false })
+  ).toBeVisible();
+  await expect(page).toHaveURL(/\/admin\/posts\/new$/);
+  await expect(editor).toHaveValue(/Typed while the create request was pending\.$/);
+  await expect(page.locator(".editor-statusbar .chip.is-dirty")).toHaveText(
+    "有未保存修改"
+  );
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        localStorage.getItem("manjyun:admin-editor:pending-created-post")
+      )
+    )
+    .toMatch(/^\d+$/);
+  await page.evaluate(() => {
+    localStorage.setItem("manjyun:admin-editor:draft:new", "stale-new-draft");
+  });
+
+  await page.getByRole("button", { name: "保存草稿", exact: true }).click();
+  await page.waitForURL(/\/admin\/posts\/\d+$/);
+  expect(createRequests).toBe(1);
+  expect(updateRequests).toBe(1);
+  await expect(page.locator(".markdown-editor")).toHaveValue(
+    /Typed while the create request was pending\.$/
+  );
+  await expect(page.locator(".editor-statusbar .chip.is-dirty")).toHaveCount(0);
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        localStorage.getItem("manjyun:admin-editor:pending-created-post")
+      )
+    )
+    .toBeNull();
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        localStorage.getItem("manjyun:admin-editor:draft:new")
+      )
+    )
+    .toBeNull();
+
+  await page.reload();
+  await expect(page.locator(".markdown-editor")).toHaveValue(
+    /Typed while the create request was pending\.$/
+  );
+});
+
+test("a raced first save can recover through the canonical editor after reload", async ({
+  page
+}) => {
+  await login(page);
+  await page.goto("/admin/posts/new");
+  await page.getByLabel("标题", { exact: true }).fill("E2E recoverable draft");
+  await page.getByLabel("Slug", { exact: true }).fill("e2e-recoverable-draft");
+  const editor = page.locator(".markdown-editor");
+  await editor.fill("## Before request");
+
+  let releaseCreate;
+  let markCreateStarted;
+  const createGate = new Promise((resolve) => {
+    releaseCreate = resolve;
+  });
+  const createStarted = new Promise((resolve) => {
+    markCreateStarted = resolve;
+  });
+  let delayed = false;
+  await page.route("**/api/admin/posts", async (route) => {
+    if (!delayed && route.request().method() === "POST") {
+      delayed = true;
+      markCreateStarted();
+      await createGate;
+    }
+    await route.continue();
+  });
+
+  await page.getByRole("button", { name: "保存草稿", exact: true }).click();
+  await createStarted;
+  await editor.evaluate((element) => {
+    element.focus();
+    element.setSelectionRange(element.value.length, element.value.length);
+  });
+  await editor.type("\n\nRecovered after reload.");
+  releaseCreate();
+  await expect(
+    page.getByText("已保存请求发出时的版本", { exact: false })
+  ).toBeVisible();
+
+  await page.reload();
+  await page.waitForURL(/\/admin\/posts\/\d+$/);
+  await expect(
+    page.getByText("检测到未提交的本地草稿", { exact: true })
+  ).toBeVisible();
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        localStorage.getItem("manjyun:admin-editor:pending-created-post")
+      )
+    )
+    .toBeNull();
+  await page.getByRole("button", { name: "恢复草稿", exact: true }).click();
+  await expect(page.locator(".markdown-editor")).toHaveValue(
+    /Recovered after reload\.$/
+  );
+  await page.getByRole("button", { name: "保存草稿", exact: true }).click();
+  await expect(page.locator(".editor-statusbar .chip.is-dirty")).toHaveCount(0);
+  await page.reload();
+  await expect(page.locator(".markdown-editor")).toHaveValue(
+    /Recovered after reload\.$/
+  );
+});
+
 test("custom page and settings changes complete their public UI chains", async ({
   page
 }) => {
-  test.setTimeout(60_000);
+  test.setTimeout(90_000);
   await login(page);
 
   await page.goto("/about");
@@ -382,6 +556,138 @@ test("custom page and settings changes complete their public UI chains", async (
   await expect(
     page.getByRole("heading", { level: 1, name: "独立页面" })
   ).toBeVisible();
+  const aboutRow = page.locator(".content-table tbody tr").filter({
+    has: page.locator("code", { hasText: "/about" })
+  });
+  await aboutRow.getByRole("link", { name: "编辑" }).click();
+  await page.waitForURL(/\/admin\/pages\/\d+$/);
+  const aboutId = Number(new URL(page.url()).pathname.split("/").at(-1));
+  expect(aboutId).toBeGreaterThan(0);
+
+  await page.getByRole("button", { name: "写作", exact: true }).click();
+  const aboutEditor = page.locator(".markdown-editor");
+  await expect(
+    page.getByRole("toolbar", { name: "Markdown 格式工具栏" })
+  ).toBeVisible();
+  await aboutEditor.fill([
+    "# About",
+    "",
+    "# Services",
+    "",
+    "NAS 上目前跑着的服务：",
+    "[code:C++]",
+    "#include <iostream>",
+    "int main() { return 0; }",
+    "[/code]",
+    "",
+    "~~retired~~",
+    "",
+    "| Service | State |",
+    "| :--- | ---: |",
+    "| mblog-app | ready |",
+    "",
+    "> [!IMPORTANT]",
+    "> Keep backups."
+  ].join("\n"));
+  await aboutEditor.evaluate((element) => {
+    const start = element.value.indexOf("NAS");
+    element.focus();
+    element.setSelectionRange(start, start + 3);
+  });
+  await page.getByRole("button", { name: /加粗（/ }).click();
+  await expect(aboutEditor).toHaveValue(/\*\*NAS\*\* 上目前跑着的服务：/);
+
+  await page.getByRole("button", { name: "分栏", exact: true }).click();
+  const aboutPreview = page.locator(".preview-pane");
+  await expect(aboutPreview.locator("h1")).toHaveCount(0);
+  await expect(
+    aboutPreview.getByRole("heading", { level: 2, name: "Services" })
+  ).toBeVisible();
+  await expect(
+    aboutPreview.locator("pre.mj-code-block code.language-cpp")
+  ).toContainText("int main()");
+  await expect(aboutPreview.locator("del")).toHaveText("retired");
+  await expect(aboutPreview.locator('th[align="right"]')).toHaveText("State");
+  await expect(aboutPreview.locator(".mj-callout-card.important")).toContainText(
+    "Keep backups."
+  );
+
+  let releaseSave;
+  let markSaveStarted;
+  const saveGate = new Promise((resolve) => {
+    releaseSave = resolve;
+  });
+  const saveStarted = new Promise((resolve) => {
+    markSaveStarted = resolve;
+  });
+  let delayNextSave = true;
+  await page.route(`**/api/admin/posts/${aboutId}`, async (route) => {
+    if (delayNextSave && route.request().method() === "PUT") {
+      delayNextSave = false;
+      markSaveStarted();
+      await saveGate;
+    }
+    await route.continue();
+  });
+
+  await page.getByRole("button", { name: "保存更改", exact: true }).click();
+  await saveStarted;
+  await aboutEditor.evaluate((element) => {
+    element.focus();
+    element.setSelectionRange(element.value.length, element.value.length);
+  });
+  await aboutEditor.type("\n\n保存期间的新修改。");
+  const aboutSlug = page.getByLabel("Slug", { exact: true });
+  await aboutSlug.fill("about-unsaved-change");
+  releaseSave();
+  await expect(
+    page.getByText("已保存请求发出时的版本", { exact: false })
+  ).toBeVisible();
+  await expect(aboutEditor).toHaveValue(/保存期间的新修改。$/);
+  await expect(aboutSlug).toHaveValue("about-unsaved-change");
+  await expect(page.locator(".editor-statusbar .chip.is-dirty")).toHaveText(
+    "有未保存修改"
+  );
+  await expect
+    .poll(() =>
+      page.evaluate(
+        (id) => localStorage.getItem(`manjyun:admin-editor:draft:${id}`),
+        aboutId
+      )
+    )
+    .not.toBeNull();
+
+  await aboutSlug.fill("about");
+  await page.getByRole("button", { name: "保存更改", exact: true }).click();
+  await expect(page.locator(".editor-statusbar .chip.is-dirty")).toHaveCount(0);
+  await expect
+    .poll(() =>
+      page.evaluate(
+        (id) => localStorage.getItem(`manjyun:admin-editor:draft:${id}`),
+        aboutId
+      )
+    )
+    .toBeNull();
+
+  await page.goto("/about");
+  await expect(
+    page.getByRole("heading", { level: 1, name: "About" })
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { level: 2, name: "Services" })
+  ).toBeVisible();
+  await expect(page.locator("pre.mj-code-block code.language-cpp")).toContainText(
+    "int main()"
+  );
+  await expect(page.locator("del")).toHaveText("retired");
+  await expect(page.locator('th[align="right"]')).toHaveText("State");
+  await expect(page.locator(".mj-callout-card.important")).toContainText(
+    "Keep backups."
+  );
+  await expect(page.locator("body")).not.toContainText("[code:C++]");
+  await expect(page.getByText("保存期间的新修改。", { exact: true })).toBeVisible();
+
+  await page.goto("/admin/pages");
   await page.getByLabel("页面标题").fill("E2E Standalone Page");
   await page.getByLabel("Slug（可留空）").fill("e2e-standalone-page");
   await page.getByRole("button", { name: "创建草稿并编辑" }).click();

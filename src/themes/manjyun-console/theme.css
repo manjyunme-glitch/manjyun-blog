@@ -968,6 +968,12 @@
     text-decoration-color: var(--accent);
   }
 
+  .gh-content del {
+    color: var(--muted);
+    text-decoration-color: #d86f63;
+    text-decoration-thickness: 0.1em;
+  }
+
   .gh-content code {
     padding: 0.15em 0.4em;
     border: 1px solid var(--border);
@@ -1009,11 +1015,18 @@
   }
 
   .gh-content input[type="checkbox"] {
+    display: inline-block;
     width: 0.95rem;
     height: 0.95rem;
     margin: 0 0.42rem 0 0;
+    opacity: 1;
+    pointer-events: none;
     vertical-align: -0.12rem;
     accent-color: var(--accent);
+  }
+
+  .gh-content li:has(> input[type="checkbox"]) {
+    list-style: none;
   }
 
   .gh-content blockquote {
@@ -1052,6 +1065,18 @@
     text-align: left;
   }
 
+  .gh-content :where(th, td)[align="left"] {
+    text-align: left;
+  }
+
+  .gh-content :where(th, td)[align="center"] {
+    text-align: center;
+  }
+
+  .gh-content :where(th, td)[align="right"] {
+    text-align: right;
+  }
+
   .gh-content th {
     background: var(--surface);
     color: var(--accent);
@@ -1067,6 +1092,27 @@
   .mj-audio-card,
   .mj-callout-card {
     padding: 1rem;
+  }
+
+  .mj-callout-card {
+    --callout-accent: var(--accent);
+    border-left: 3px solid var(--callout-accent);
+  }
+
+  .mj-callout-card.important {
+    --callout-accent: #8fb8ff;
+    background: color-mix(in srgb, #8fb8ff 8%, var(--surface));
+  }
+
+  .mj-callout-card.warning,
+  .mj-callout-card.warn {
+    --callout-accent: #f4bf66;
+    background: color-mix(in srgb, #f4bf66 8%, var(--surface));
+  }
+
+  .mj-callout-card.caution {
+    --callout-accent: #e27b70;
+    background: color-mix(in srgb, #e27b70 8%, var(--surface));
   }
 
   .mj-audio-card audio {
@@ -1087,6 +1133,10 @@
     font-family: var(--mono);
     font-size: 0.78rem;
     text-transform: uppercase;
+  }
+
+  .mj-callout-card strong {
+    color: var(--callout-accent);
   }
 
   .mj-audio-meta strong,

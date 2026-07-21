@@ -133,7 +133,7 @@ test("markdown custom cards never expand inside fenced or inline code", () => {
     "  ```"
   ].join("\n"));
 
-  assert.doesNotMatch(rendered.html, /mj-(?:audio|bookmark|callout|code)-/);
+  assert.doesNotMatch(rendered.html, /mj-(?:audio|bookmark|callout)-/);
   assert.match(
     rendered.html,
     /\[audio:Hidden\]\(\/uploads\/hidden\.mp3 "inside fence"\)/
@@ -233,11 +233,11 @@ test("custom callouts render native inline and fenced code without leaking into 
   assert.match(rendered.html, /Run <code>npm test<\/code> before deploying\./);
   assert.match(
     rendered.html,
-    /<pre class="mj-code-block"><code class="language-ts">const nested = true;<\/code><\/pre>/
+    /<pre class="mj-code-block"><code class="language-typescript">const nested = true;<\/code><\/pre>/
   );
   assert.match(
     rendered.html,
-    /<pre><code class="language-sh">npm run check\n<\/code><\/pre>/
+    /<pre class="mj-code-block"><code class="language-bash">npm run check<\/code><\/pre>/
   );
   assert.deepEqual(rendered.toc, []);
 });
@@ -252,7 +252,7 @@ test("callout boundaries ignore closing markers inside fenced code", () => {
     "::"
   ].join("\n"));
 
-  assert.match(rendered.html, /<code class="language-text">::\n<\/code>/);
+  assert.match(rendered.html, /<code class="language-text">::<\/code>/);
   assert.match(rendered.html, /After fence\./);
   assert.equal(
     (rendered.html.match(/mj-callout-card/g) ?? []).length,
@@ -274,7 +274,7 @@ test("callout boundaries understand list and blockquote fenced code", () => {
   ].join("\n"));
 
   assert.equal(
-    (rendered.html.match(/<code class="language-text">::\n<\/code>/g) ?? [])
+    (rendered.html.match(/<code class="language-text">::<\/code>/g) ?? [])
       .length,
     2
   );
@@ -295,8 +295,8 @@ test("callout boundaries track ordered-list content indentation", () => {
     "::"
   ].join("\n"));
 
-  assert.match(rendered.html, /<ol>/);
-  assert.match(rendered.html, /<code class="language-text">::\n<\/code>/);
+  assert.match(rendered.html, /<ol start="10">/);
+  assert.match(rendered.html, /<code class="language-text">::<\/code>/);
   assert.match(rendered.html, /After ordered fence\./);
   assert.equal(
     (rendered.html.match(/mj-callout-card/g) ?? []).length,
@@ -417,6 +417,38 @@ test("markdown renderer supports compatible code blocks and task lists", () => {
   assert.match(rendered.html, /type="checkbox"/);
 });
 
+test("custom blocks interrupt adjacent paragraphs without requiring blank lines", () => {
+  const rendered = renderMarkdown([
+    "NAS 上目前跑着的服务：",
+    "[code:sh]",
+    "docker compose ps",
+    "[/code]",
+    "音频：",
+    '[audio:Signal](/uploads/signal.mp3 "Local")',
+    "参考：",
+    '[bookmark:Docs](https://example.com "Reference")',
+    "注意：",
+    "::callout Deploy",
+    "Run `npm test` first.",
+    "::",
+    "完成。"
+  ].join("\n"));
+
+  assert.match(rendered.html, /<p>NAS 上目前跑着的服务：<\/p>/);
+  assert.match(
+    rendered.html,
+    /<pre class="mj-code-block"><code class="language-bash">docker compose ps<\/code><\/pre>/
+  );
+  assert.match(rendered.html, /<p>音频：<\/p>/);
+  assert.match(rendered.html, /<figure class="kg-card mj-audio-card">/);
+  assert.match(rendered.html, /<p>参考：<\/p>/);
+  assert.match(rendered.html, /<a class="kg-card mj-bookmark-card"/);
+  assert.match(rendered.html, /<p>注意：<\/p>/);
+  assert.match(rendered.html, /<aside class="kg-card mj-callout-card">/);
+  assert.match(rendered.html, /<p>完成。<\/p>/);
+  assert.doesNotMatch(rendered.html, /\[\/?(?:code|audio|bookmark)/);
+});
+
 test("compatible code blocks preserve indentation exactly", () => {
   const rendered = renderMarkdown(`[code]
     {
@@ -429,6 +461,234 @@ test("compatible code blocks preserve indentation exactly", () => {
     rendered.html,
     /<code class="language-json">    \{\n      "blog": "www\.manjyun\.top",\n      "motto": "能自建的绝不用别人的，能折腾的绝不躺平。"\n    \}<\/code>/
   );
+});
+
+test("standard fenced code preserves meaningful leading and trailing blank lines", () => {
+  const rendered = renderMarkdown([
+    "```text",
+    "",
+    "first",
+    "",
+    "```"
+  ].join("\n"));
+
+  assert.match(
+    rendered.html,
+    /<pre class="mj-code-block"><code class="language-text">\nfirst\n<\/code><\/pre>/
+  );
+});
+
+test("GFM formatting survives sanitization with its visible semantics intact", () => {
+  const rendered = renderMarkdown([
+    "~~retired~~",
+    "",
+    "3. third",
+    "4. fourth",
+    "",
+    "| Left | Center | Right |",
+    "| :--- | :---: | ---: |",
+    "| a | b | c |",
+    "",
+    '[Docs](https://example.com/docs "Reference title")',
+    "",
+    "- [x] shipped",
+    "",
+    "<https://example.com/auto>"
+  ].join("\n"));
+
+  assert.match(rendered.html, /<del>retired<\/del>/);
+  assert.match(rendered.html, /<ol start="3">/);
+  assert.match(rendered.html, /<th align="left">Left<\/th>/);
+  assert.match(rendered.html, /<th align="center">Center<\/th>/);
+  assert.match(rendered.html, /<th align="right">Right<\/th>/);
+  assert.match(
+    rendered.html,
+    /<a href="https:\/\/example\.com\/docs" title="Reference title" target="_blank" rel="noopener noreferrer">/
+  );
+  assert.match(
+    rendered.html,
+    /<input(?=[^>]*type="checkbox")(?=[^>]*checked)(?=[^>]*disabled)[^>]*>/
+  );
+  assert.match(
+    rendered.html,
+    /<a href="https:\/\/example\.com\/auto" target="_blank" rel="noopener noreferrer">/
+  );
+});
+
+test("sanitization keeps disabled task checkboxes and removes arbitrary raw inputs", () => {
+  const rendered = renderMarkdown([
+    "- [x] shipped",
+    "",
+    '<input type="file">',
+    '<input type="text" disabled>',
+    '<input type="checkbox">',
+    '<input type="checkbox" checked disabled>'
+  ].join("\n"));
+
+  assert.equal((rendered.html.match(/<input/g) ?? []).length, 1);
+  assert.match(
+    rendered.html,
+    /<input(?=[^>]*type="checkbox")(?=[^>]*checked)(?=[^>]*disabled)[^>]*>/
+  );
+  assert.doesNotMatch(rendered.html, /type="(?:file|text)"/);
+});
+
+test("raw inputs cannot survive through Markdown heading inline rendering", () => {
+  const rendered = renderMarkdown(
+    '## Heading <input type="checkbox" checked disabled>'
+  );
+
+  assert.match(rendered.html, /<h2 id="heading">Heading <\/h2>/);
+  assert.doesNotMatch(rendered.html, /<input/);
+});
+
+test("raw inputs cannot survive through callout heading inline rendering", () => {
+  const rendered = renderEntryMarkdown([
+    "::callout Nested",
+    '# Callout heading <input type="checkbox" checked disabled>',
+    "::"
+  ].join("\n"), "Page title");
+
+  assert.match(rendered.html, /<h2>Callout heading <\/h2>/);
+  assert.doesNotMatch(rendered.html, /<input/);
+});
+
+test("code blocks normalize common language aliases and always escape code HTML", () => {
+  const rendered = renderMarkdown([
+    "[code:C++]",
+    "#include <script>alert(1)</script>",
+    "[/code]",
+    "",
+    "```C#",
+    'Console.WriteLine("<b>safe</b>");',
+    "```",
+    "",
+    "```TypeScript",
+    "const ready = true;",
+    "```"
+  ].join("\n"));
+
+  assert.match(rendered.html, /class="language-cpp"/);
+  assert.match(rendered.html, /class="language-csharp"/);
+  assert.match(rendered.html, /class="language-typescript"/);
+  assert.match(rendered.html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
+  assert.match(rendered.html, /&lt;b&gt;safe&lt;\/b&gt;/);
+  assert.doesNotMatch(rendered.html, /<script|<b>safe/);
+});
+
+test("entry rendering demotes raw and nested h1 headings without polluting the toc", () => {
+  const rendered = renderEntryMarkdown([
+    '<h1 onclick="alert(1)">Raw heading</h1>',
+    "",
+    "::callout Nested",
+    "# Callout heading",
+    "::",
+    "",
+    "# Public section"
+  ].join("\n"), "Page title");
+
+  assert.doesNotMatch(rendered.html, /<h1[ >]/);
+  assert.match(rendered.html, /<h2>Raw heading<\/h2>/);
+  assert.match(rendered.html, /<h2>Callout heading<\/h2>/);
+  assert.match(
+    rendered.html,
+    /<h2 id="public-section">Public section<\/h2>/
+  );
+  assert.deepEqual(rendered.toc, [
+    { id: "public-section", level: 2, text: "Public section" }
+  ]);
+  assert.doesNotMatch(rendered.html, /onclick=/);
+});
+
+test("blockquote alerts cover the documented variants and harden external links", () => {
+  const rendered = renderMarkdown([
+    "> [!IMPORTANT]",
+    "> Keep this.",
+    "",
+    "> [!WARNING]",
+    "> Check this.",
+    "",
+    "> [!CAUTION]",
+    "> Stop here.",
+    "",
+    '<a href="//example.com/path">protocol relative</a>',
+    "",
+    '<a href="HTTPS://example.com/path">uppercase scheme</a>'
+  ].join("\n"));
+
+  assert.match(rendered.html, /mj-callout-card important/);
+  assert.match(rendered.html, /mj-callout-card warn/);
+  assert.match(rendered.html, /mj-callout-card caution/);
+  assert.equal(
+    (rendered.html.match(/rel="noopener noreferrer"/g) ?? []).length,
+    2
+  );
+});
+
+test("every target blank link is protected even when its href is not classified as external", () => {
+  const rendered = renderMarkdown([
+    '<a href="/local" target="_blank" rel="opener">local</a>',
+    "",
+    '<a href="/\\\\evil.example/path" target="_BLANK" rel="opener">normalized external</a>'
+  ].join("\n"));
+
+  assert.equal(
+    (rendered.html.match(/target="_blank" rel="noopener noreferrer"/g) ?? [])
+      .length,
+    2
+  );
+  assert.doesNotMatch(rendered.html, /rel="opener"/);
+});
+
+test("unclosed custom blocks remain recoverable text instead of swallowing the document", () => {
+  const rendered = renderMarkdown([
+    "Before",
+    "[code:C++]",
+    "int main() {}",
+    "",
+    "::callout Missing close",
+    "After"
+  ].join("\n"));
+
+  assert.match(rendered.html, /\[code:C\+\+\]/);
+  assert.match(rendered.html, /int main\(\) \{\}/);
+  assert.match(rendered.html, /::callout Missing close/);
+  assert.match(rendered.html, /After/);
+  assert.doesNotMatch(rendered.html, /mj-code-block|mj-callout-card/);
+});
+
+test("audio and bookmark cards accept balanced, escaped, and angle-bracket destinations", () => {
+  const rendered = renderMarkdown([
+    '[bookmark:Reference](https://example.com/wiki/Function_(math) "Balanced")',
+    "",
+    String.raw`[audio:Episode](/uploads/episode\(1\).mp3 "Escaped")`,
+    "",
+    '[bookmark:Spaced](<https://example.com/a%20b> "Angle")'
+  ].join("\n"));
+
+  assert.match(
+    rendered.html,
+    /href="https:\/\/example\.com\/wiki\/Function_\(math\)"/
+  );
+  assert.match(rendered.html, /src="\/uploads\/episode\(1\)\.mp3"/);
+  assert.match(rendered.html, /href="https:\/\/example\.com\/a%20b"/);
+  assert.equal(
+    (rendered.html.match(/mj-bookmark-card/g) ?? []).length,
+    2
+  );
+  assert.equal((rendered.html.match(/mj-audio-card/g) ?? []).length, 1);
+});
+
+test("bookmark destination text cannot break out of its small element", () => {
+  const rendered = renderMarkdown(
+    "[bookmark:Reference](https://example.com/</small><img/src=https://evil.example/pixel>)"
+  );
+
+  assert.match(
+    rendered.html,
+    /<small>https:\/\/example\.com\/&lt;\/small&gt;&lt;img\/src=https:\/\/evil\.example\/pixel&gt;<\/small>/
+  );
+  assert.doesNotMatch(rendered.html, /<img/);
 });
 
 test("theme registry returns the default theme", () => {

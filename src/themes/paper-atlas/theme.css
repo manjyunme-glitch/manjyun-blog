@@ -370,16 +370,28 @@
   .paper-prose li { margin: 0.45rem 0; }
   .paper-prose a { color: var(--blue); text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--blue) 35%, transparent); text-underline-offset: 4px; }
   .paper-prose a:hover { text-decoration-color: var(--blue); }
+  .paper-prose del { color: var(--ink-faint); text-decoration-color: var(--red); text-decoration-thickness: 0.1em; }
+  .paper-prose input[type="checkbox"] { display: inline-block; width: 0.95rem; height: 0.95rem; margin: 0 0.42rem 0 0; opacity: 1; pointer-events: none; vertical-align: -0.12rem; accent-color: var(--red); }
+  .paper-prose li:has(> input[type="checkbox"]) { list-style: none; }
   .paper-prose :not(pre) > code { padding: 0.14em 0.38em; border: 1px solid var(--line); background: var(--paper-muted); color: #8b3c2f; font-family: var(--mono); font-size: 0.84em; overflow-wrap: anywhere; }
   .paper-prose pre { width: 100%; max-width: 100%; overflow-x: auto; padding: 1.2rem; border-left: 4px solid var(--blue); background: #292b32; color: #f5efe5; font-family: var(--mono); font-size: 0.78rem; line-height: 1.7; }
   .paper-prose pre.mj-code-block { border-left-color: var(--red); }
   .paper-prose pre code { padding: 0; border: 0; background: transparent; color: inherit; }
   .paper-prose blockquote, .mj-callout-card { margin: 1.5rem 0; padding: 1rem 1.2rem; border: 0; border-left: 4px solid var(--red); background: var(--paper-muted); color: var(--ink-soft); }
+  .paper-prose .mj-callout-card { --callout-accent: var(--red); border-left-color: var(--callout-accent); }
+  .paper-prose .mj-callout-card.important { --callout-accent: var(--blue); background: color-mix(in srgb, var(--blue) 8%, var(--paper-muted)); }
+  .paper-prose .mj-callout-card.warning,
+  .paper-prose .mj-callout-card.warn { --callout-accent: #a46718; background: color-mix(in srgb, #d8a53a 12%, var(--paper-muted)); }
+  .paper-prose .mj-callout-card.caution { --callout-accent: var(--red); background: color-mix(in srgb, var(--red) 9%, var(--paper-muted)); }
+  .paper-prose .mj-callout-card > strong { color: var(--callout-accent); font-family: var(--mono); text-transform: uppercase; }
   .paper-prose img { margin: 1.5rem auto; }
   .paper-prose .table-scroll { min-width: 0; width: 100%; max-width: 100%; overflow-x: auto; overscroll-behavior-inline: contain; }
   .paper-prose table { border-collapse: collapse; font-family: var(--sans); font-size: 0.78rem; }
   .paper-prose .table-scroll table { width: max-content; min-width: 100%; max-width: none; }
   .paper-prose th, .paper-prose td { padding: 0.65rem 0.8rem; border: 1px solid var(--line); text-align: left; }
+  .paper-prose :where(th, td)[align="left"] { text-align: left; }
+  .paper-prose :where(th, td)[align="center"] { text-align: center; }
+  .paper-prose :where(th, td)[align="right"] { text-align: right; }
   .paper-prose th { background: var(--paper-muted); color: var(--ink); }
   .paper-prose .mj-audio-card, .paper-prose .mj-bookmark-card { display: block; margin: 1.5rem 0; padding: 1rem 1.2rem; border: 1px solid var(--line); background: var(--paper-raised); }
   .paper-prose .mj-audio-card audio { width: 100%; margin-top: 0.8rem; }
